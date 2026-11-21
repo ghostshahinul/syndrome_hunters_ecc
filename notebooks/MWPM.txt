@@ -1,3 +1,13 @@
 On MWPM Decoder:
 
 imagine each detector on a grid of qbits. Each detector that activates can be treated as a node for a graph. Each edge is minimal path between two nodes. The minimal path in general is the smallest path between all nodes. This need not be continuous. 
+
+Pros:
+simplifies a complex problem of matching into a problem of shortest path.
+handles non-uniform error cases
+good for independent errors between X and Z.
+
+Cons:
+Correlated errors (like a Y error) can throw accuracy off
+Can be lossy for more realistic situations (where errors flip more than one detector)
+Hard coding a shortest-path optimization can lead it astray in more unusual errors
