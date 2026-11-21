@@ -41,6 +41,7 @@ class ResultsReport:
         self.rootdir = rootdir
         self.tests: dict[str, dict] = {}
         self.metrics: list[Metric] = []
+        self.figures: list[tuple[str, object]] = []
         self.out_dir: Path | None = None
         self._current_test = ""
 
@@ -51,6 +52,11 @@ class ResultsReport:
         self.metrics.append(Metric(plot, series, str(x), float(y),
                                    None if yerr is None else float(yerr),
                                    ylabel, log, self._current_test))
+
+    def add_figure(self, filename: str, render) -> None:
+        """Register a custom figure: render(path) is called after the run with
+        path = results/tests/<run>/<filename>."""
+        self.figures.append((filename, render))
 
     # ---- pytest hooks --------------------------------------------------------------
     def pytest_runtest_setup(self, item):
@@ -83,6 +89,8 @@ class ResultsReport:
                 by_plot[m.plot].append(m)
             for name, ms in by_plot.items():
                 self._plot_metric(name, ms, out / f"{name}.png")
+        for filename, render in self.figures:
+            render(out / filename)
 
     def pytest_terminal_summary(self, terminalreporter):
         if self.out_dir is not None:

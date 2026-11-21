@@ -9,6 +9,8 @@ from src.decoders import DECODERS
 def pytest_addoption(parser):
     parser.addoption("--no-plots", action="store_true",
                      help="don't write test plots to results/tests/")
+    parser.addoption("--op-shots", type=int, default=50_000,
+                     help="shots per point for the accuracy/runtime operating-point test")
 
 
 def pytest_configure(config):
@@ -23,7 +25,10 @@ def report(pytestconfig):
     plugin = pytestconfig.pluginmanager.get_plugin("results-report")
     if plugin is None:
         class _Null:
-            def add(self, *a, **k):
+            def add(self, *_args, **_kwargs):
+                pass
+
+            def add_figure(self, *_args, **_kwargs):
                 pass
         return _Null()
     return plugin
