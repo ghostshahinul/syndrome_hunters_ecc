@@ -5,7 +5,8 @@ decoder, and record logical failure rate (95% Wilson interval) and batch time pe
 (wall time of one decode call over all shots / shots, decoder construction excluded).
 
 CLI:  python -m src.operating_point --distances 3 5 7 --p 0.005 --shots 50000
-Writes results/operating_point_<timestamp>.csv and .png (never overwrites).
+Each run writes results/operating_point/operating_point_run<N>.csv and .png, with N
+one higher than the last run (never overwrites). pytest uses the same numbering.
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -140,7 +141,7 @@ SERIES_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 INK, INK_2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 
 
-def plot_operating_point(rows: list[OperatingPoint], path: Path) -> Path:
+def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int | None = None) -> Path:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -172,22 +173,13 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path) -> Path:
         for side in ("left", "bottom"):
             ax.spines[side].set_color(AXIS)
         ax.tick_params(colors=INK_2, labelsize=11, length=4, color=AXIS)
-    # Log y: rates span >10x across decoders, a linear axis flattens the best ones.
-    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
-    lo = min(100 * r.ler_low for r in rows if r.ler_low > 0)
-    hi = max(100 * r.ler_high for r in rows)
-    ticks = [t for t in (0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100) if lo / 1.5 <= t <= hi * 1.5]
-    axes[0].set_yscale("log")
-    axes[0].set_ylim(lo / 1.3, hi * 1.3)
-    axes[0].yaxis.set_major_locator(FixedLocator(ticks))
-    axes[0].yaxis.set_minor_locator(NullLocator())
-    axes[0].yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-    axes[0].set_ylabel("Logical failures (%, log scale)", fontsize=12, color=INK_2)
+    axes[0].set_ylabel("Logical failures (%)", fontsize=12, color=INK_2)
 
     fig.text(0.06, 0.985, "Accuracy and batch time at one operating point",
              fontsize=22, fontweight="bold", color=INK, va="top")
+    run_label = f"  ·  run {run_number}" if run_number is not None else ""
     fig.text(0.06, 0.915, f"Rotated Z memory  ·  rounds = distance  ·  {first.shots:,} shots per point"
-             f"  ·  physical error {100 * first.p:.2f}%  ·  circuit-level noise",
+             f"  ·  physical error {100 * first.p:.2f}%  ·  circuit-level noise{run_label}",
              fontsize=12, color=INK_2, va="top")
     handles = [Line2D([], [], color=style[n][0], marker=style[n][1], ms=9, lw=2.5, label=n)
                for n in decoders]
@@ -212,6 +204,32 @@ def write_csv(rows: list[OperatingPoint], path: Path) -> Path:
     return path
 
 
+RUNS_DIR = Path("results") / "operating_point"
+RUN_STEM = "operating_point_run"
+
+
+def next_run_number(directory: Path = RUNS_DIR) -> int:
+    """1 + the highest N among existing operating_point_run<N>.* files (1 if none)."""
+    numbers = [int(m.group(1)) for f in directory.glob(f"{RUN_STEM}*")
+               if (m := re.fullmatch(rf"{RUN_STEM}(\d+)\.\w+", f.name))]
+    return max(numbers, default=0) + 1
+
+
+def save_run(rows: list[OperatingPoint], directory: Path = RUNS_DIR) -> tuple[int, Path, Path]:
+    """Write operating_point_run<N>.csv/.png with the next free N. Never overwrites."""
+    directory.mkdir(parents=True, exist_ok=True)
+    while True:
+        n = next_run_number(directory)
+        csv_path = directory / f"{RUN_STEM}{n}.csv"
+        try:
+            write_csv(rows, csv_path)  # opened with "x": claims N atomically
+            break
+        except FileExistsError:
+            continue
+    png_path = plot_operating_point(rows, directory / f"{RUN_STEM}{n}.png", run_number=n)
+    return n, csv_path, png_path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--distances", type=int, nargs="+", default=[3, 5, 7])
@@ -220,9 +238,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     rows = measure(args.distances, args.p, args.shots, args.seed)
-    stem = Path("results") / f"operating_point_{datetime.now():%Y%m%d-%H%M%S}"
-    print(f"wrote {write_csv(rows, stem.with_suffix('.csv'))}")
-    print(f"wrote {plot_operating_point(rows, stem.with_suffix('.png'))}")
+    n, csv_path, png_path = save_run(rows)
+    print(f"run {n}: wrote {csv_path} and {png_path}")
 
 
 if __name__ == "__main__":
