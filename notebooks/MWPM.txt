@@ -1,1 +1,3 @@
 On MWPM Decoder:
+
+imagine each detector on a grid of qbits. Each detector that activates can be treated as a node for a graph. Each edge is minimal path between two nodes. The minimal path in general is the smallest path between all nodes. This need not be continuous. 
