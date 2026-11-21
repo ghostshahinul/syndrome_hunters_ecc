@@ -29,11 +29,13 @@ def test_no_detections_means_no_flip(decoder):
     assert not out.any()
 
 
-def test_every_single_fault_is_corrected(decoder, small_dem):
+def test_every_single_fault_is_corrected(decoder, small_dem, report):
     cases = single_fault_cases(small_dem)
     assert cases, "DEM has no error mechanisms?"
     syndromes = np.array([c[0] for c in cases])
     expected = np.array([c[1] for c in cases])
     predicted = decoder.decode_batch(syndromes)
     wrong = np.flatnonzero(np.any(predicted != expected, axis=1))
+    report.add("single_fault_correction", decoder.name, f"d=3 ({len(cases)} faults)",
+               1 - wrong.size / len(cases), ylabel="fraction of single faults corrected")
     assert wrong.size == 0, f"{wrong.size}/{len(cases)} single faults mis-decoded, e.g. #{wrong[:5]}"

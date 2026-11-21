@@ -27,6 +27,12 @@ pip install -e ".[dev]"
 
 Make variables: `DISTANCES`, `PS`, `SHOTS`, `DECODERS`, e.g. `make bench SHOTS=10000`.
 
+Every test run also writes plots to a new `results/tests/<timestamp>/` folder:
+`outcomes.png`, `durations.png`, plus one chart per metric that tests record via the
+`report` fixture (e.g. `ler_vs_baseline.png`, `single_fault_correction.png`), with the
+raw numbers in `tests.csv` / `metrics.csv`. Skip this with `pytest --no-plots`.
+To add a metric in a test: `report.add("plot_name", decoder.name, "d=5", value, yerr)`.
+
 ## Layout
 
 ```
