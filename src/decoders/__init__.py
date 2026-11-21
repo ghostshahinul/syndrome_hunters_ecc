@@ -2,11 +2,13 @@
 
 from src.decoders.base import Decoder
 from src.decoders.baseline import PyMatchingDecoder
+from src.decoders.cube_collapse import CubeCollapseDecoder
 from src.decoders.experimental import ExperimentalDecoder
 from src.decoders.union_find import UnionFindDecoder
 
 DECODERS: dict[str, type[Decoder]] = {
-    cls.name: cls for cls in (PyMatchingDecoder, UnionFindDecoder, ExperimentalDecoder)
+    cls.name: cls
+    for cls in (PyMatchingDecoder, UnionFindDecoder, ExperimentalDecoder, CubeCollapseDecoder)
 }
 
 
