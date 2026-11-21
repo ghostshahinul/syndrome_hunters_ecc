@@ -11,3 +11,5 @@ Cons:
 Correlated errors (like a Y error) can throw accuracy off
 Can be lossy for more realistic situations (where errors flip more than one detector)
 Hard coding a shortest-path optimization can lead it astray in more unusual errors
+
+An implementation is as such: https://github.com/yuewuo/fusion-blossom/tree/main
