@@ -1,6 +1,7 @@
 # Mirrors pyproject.toml; prefer: pip install -e ".[dev]"
 numpy==2.5.5
 stim==1.16.0
+sinter==1.16.0
 pymatching==2.4.0
 matplotlib==3.11.2
 pytest==9.2.0
