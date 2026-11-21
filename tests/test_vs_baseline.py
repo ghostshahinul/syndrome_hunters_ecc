@@ -14,8 +14,6 @@ from src.data import sample
 from src.decoders import DECODERS
 from src.decoders.baseline import PyMatchingDecoder
 
-from conftest import build_or_skip
-
 CANDIDATES = sorted(n for n in DECODERS if n != PyMatchingDecoder.name)
 
 
@@ -24,7 +22,7 @@ CANDIDATES = sorted(n for n in DECODERS if n != PyMatchingDecoder.name)
 def test_ler_close_to_baseline(name, distance, p):
     circuit = surface_code_circuit(distance, p)
     dem = detector_error_model(circuit)
-    candidate = build_or_skip(DECODERS[name], dem)
+    candidate = DECODERS[name](dem)
     baseline = PyMatchingDecoder(dem)
 
     s = sample(circuit, shots=20_000, seed=123)

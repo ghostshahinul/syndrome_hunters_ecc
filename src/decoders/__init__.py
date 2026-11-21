@@ -1,16 +1,18 @@
 """Decoder registry. Add new decoders to DECODERS so evaluate.py and the tests see them."""
 
 from src.decoders.base import Decoder
-from src.decoders.baseline import PyMatchingDecoder
-from src.decoders.experimental import ExperimentalDecoder
+from src.decoders.baseline import CorrelatedMatchingDecoder, PyMatchingDecoder
+from src.decoders.experimental import FaultJoinDecoder
 from src.decoders.union_find import UnionFindDecoder
 
 DECODERS: dict[str, type[Decoder]] = {
-    cls.name: cls for cls in (PyMatchingDecoder, UnionFindDecoder, ExperimentalDecoder)
+    cls.name: cls for cls in (FaultJoinDecoder, PyMatchingDecoder, CorrelatedMatchingDecoder, UnionFindDecoder)
 }
 
 
 def get_decoder(name: str) -> type[Decoder]:
+    if name == "experimental":
+        return FaultJoinDecoder
     try:
         return DECODERS[name]
     except KeyError:

@@ -1,98 +1,222 @@
-"""Threshold curves and latency-scaling plots from results/*.csv.
-
-CLI:  python -m src.plots                       # newest results file
-      python -m src.plots results/bench_X.csv   # specific file(s)
-"""
+"""Render the accuracy, timing and operating-point figures from benchmark CSVs."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-from collections import defaultdict
+import math
 from pathlib import Path
 
 import matplotlib
-
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
+import numpy as np
 
-RESULTS_DIR = Path("results")
+from src.evaluate import RESULTS_DIR, wilson
+
 FIGURES_DIR = Path("figures")
+STYLES = {
+    "fault_join": ("FaultJoin", "#006e67", "o"),
+    "pymatching": ("PyMatching", "#4368a9", "s"),
+    "pymatching_correlated": ("Correlated PyMatching", "#a94e16", "^"),
+    "union_find": ("Weighted union–find", "#795789", "D"),
+}
+DISTANCE_COLORS = ["#206493", "#bd581b", "#178062", "#84529a", "#614839"]
+PLAIN = FuncFormatter(lambda value, _: f"{value:g}")
 
 
 def load_rows(paths: list[Path]) -> list[dict]:
     rows = []
+    seen = set()
     for path in paths:
-        with open(path, newline="") as f:
-            for r in csv.DictReader(f):
+        with path.open(newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
                 for k in ("distance", "rounds", "shots", "num_errors"):
-                    r[k] = int(r[k])
-                for k in ("p", "logical_error_rate", "ler_stderr", "us_per_shot"):
-                    r[k] = float(r[k])
-                rows.append(r)
+                    row[k] = int(row[k])
+                for k in ("p", "logical_error_rate", "us_per_shot"):
+                    row[k] = float(row[k])
+                row["ler_low95"], row["ler_high95"] = wilson(row["num_errors"], row["shots"])
+                for k in ("single_p50_us", "single_p95_us"):
+                    row[k] = float(row[k]) if row.get(k) else None
+                key = row["decoder"], row["distance"], row["p"]
+                if key in seen:
+                    raise ValueError(f"duplicate operating point {key}; plot independent runs separately")
+                seen.add(key)
+                rows.append(row)
+    if not rows or len({r["basis"] for r in rows}) != 1:
+        raise ValueError("supply results for one memory basis per figure set")
+    rounds = {r["rounds"] for r in rows}
+    if len(rounds) > 1 and not all(r["rounds"] == r["distance"] for r in rows):
+        raise ValueError("select either fixed rounds or rounds equal to distance")
     return rows
 
 
-def plot_threshold(rows: list[dict], out_dir: Path = FIGURES_DIR) -> list[Path]:
-    """One figure per decoder: logical error rate vs p, one line per distance."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    by_decoder = defaultdict(lambda: defaultdict(list))
-    for r in rows:
-        by_decoder[r["decoder"]][r["distance"]].append(r)
-
-    paths = []
-    for decoder, by_d in by_decoder.items():
-        fig, ax = plt.subplots(figsize=(6, 4.5))
-        for d in sorted(by_d):
-            pts = sorted(by_d[d], key=lambda r: r["p"])
-            ax.errorbar(
-                [r["p"] for r in pts], [r["logical_error_rate"] for r in pts],
-                yerr=[r["ler_stderr"] for r in pts], marker="o", capsize=3, label=f"d={d}",
-            )
-        ax.set(xscale="log", yscale="log", xlabel="physical error rate p",
-               ylabel="logical error rate per shot", title=f"Threshold: {decoder}")
-        ax.grid(True, which="both", alpha=0.3)
-        ax.legend()
-        path = out_dir / f"threshold_{decoder}.png"
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        paths.append(path)
-    return paths
+def _style(name):
+    return STYLES.get(name, (name, "#555555", "o"))
 
 
-def plot_latency(rows: list[dict], out_dir: Path = FIGURES_DIR) -> Path:
-    """µs/shot vs distance for every decoder, at the largest p in the data."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    p_max = max(r["p"] for r in rows)
-    series = defaultdict(list)
-    for r in rows:
-        if r["p"] == p_max:
-            series[r["decoder"]].append((r["distance"], r["us_per_shot"]))
+def _legend(fig, items):
+    handles = [Line2D([], [], color=color, marker=marker, lw=2, markersize=6, label=name)
+               for name, color, marker in items]
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.055, 0.855),
+               frameon=False, ncol=min(4, len(items)), columnspacing=1.8, handlelength=1.65)
 
-    fig, ax = plt.subplots(figsize=(6, 4.5))
-    for decoder, pts in sorted(series.items()):
-        pts.sort()
-        ax.plot([d for d, _ in pts], [t for _, t in pts], marker="o", label=decoder)
-    ax.set(yscale="log", xlabel="distance d", ylabel="µs per shot",
-           title=f"Decoding latency (p={p_max:g})")
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend()
-    path = out_dir / "latency_vs_distance.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+
+def _header(fig, rows, title, detail):
+    basis = rows[0]["basis"].upper()
+    rounds = ("rounds = distance" if all(r["rounds"] == r["distance"] for r in rows)
+              else f"{rows[0]['rounds']} rounds")
+    counts = {r["shots"] for r in rows}
+    shots = f"{counts.pop():,} shots per point" if len(counts) == 1 else "shot counts in CSV"
+    fig.text(.06, .955, title, fontsize=20, weight="bold", color="#172d39", va="top")
+    fig.text(.06, .89, f"Rotated {basis} memory  ·  {rounds}  ·  {shots}  ·  {detail}",
+             fontsize=10.5, color="#435864", va="top")
+
+
+def _axes(ax):
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["bottom", "left"]].set_color("#b8c4c9")
+    ax.tick_params(color="#a8b6bb", labelcolor="#243945")
+    ax.grid(axis="y", which="major", alpha=.22)
+    ax.set_axisbelow(True)
+
+
+def _accuracy_points(ax, pts, xvalues, color, marker, connect=True):
+    y = np.array([100 * r["logical_error_rate"] for r in pts])
+    lo = np.array([100 * r["ler_low95"] for r in pts])
+    hi = np.array([100 * r["ler_high95"] for r in pts])
+    x = np.asarray(xvalues)
+    have = y > 0
+    if connect:
+        ax.plot(x, np.where(have, y, np.nan), color=color, lw=1.8)
+    if have.any():
+        ax.errorbar(x[have], y[have], yerr=[y[have] - lo[have], hi[have] - y[have]],
+                    fmt=marker, color=color, capsize=2.5, elinewidth=1.1, ms=5.5)
+    if (~have).any():
+        ax.scatter(x[~have], hi[~have], marker="v", facecolors="none", edgecolors=color, s=54, zorder=3)
+
+
+def _save(fig, directory, name, footnote):
+    directory.mkdir(parents=True, exist_ok=True)
+    fig.text(.06, .035, footnote, color="#435864", fontsize=9, va="bottom")
+    path = directory / name
+    fig.savefig(path, dpi=180, facecolor="white")
     plt.close(fig)
     return path
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("files", nargs="*", type=Path)
-    args = ap.parse_args()
+def plot_threshold(rows: list[dict], out_dir: Path = FIGURES_DIR) -> list[Path]:
+    names = list(dict.fromkeys(r["decoder"] for r in rows))
+    distances = sorted({r["distance"] for r in rows})
+    styles = [(f"d = {d}", DISTANCE_COLORS[i % len(DISTANCE_COLORS)], ["o", "s", "D", "^"][i % 4])
+              for i, d in enumerate(distances)]
+    cols = min(2, len(names))
+    nrows = math.ceil(len(names) / cols)
+    fig, axes = plt.subplots(nrows, cols, figsize=(12, 4.2 + 2.5 * nrows), squeeze=False,
+                             sharex=True, sharey=True)
+    fig.subplots_adjust(left=.09, right=.97, top=.77, bottom=.14, hspace=.4, wspace=.22)
+    _header(fig, rows, "Logical failure rate across noise levels", "95% Wilson intervals")
+    _legend(fig, styles)
+    for ax, name in zip(axes.flat, names):
+        for d, (_, color, marker) in zip(distances, styles):
+            pts = sorted((r for r in rows if r["decoder"] == name and r["distance"] == d), key=lambda r: r["p"])
+            _accuracy_points(ax, pts, [100 * r["p"] for r in pts], color, marker)
+        ax.set_title(_style(name)[0], loc="left", weight="bold", fontsize=12)
+        ax.set_yscale("log")
+        ax.set_xticks(sorted({100 * r["p"] for r in rows}))
+        ax.xaxis.set_major_formatter(PLAIN)
+        ax.yaxis.set_major_formatter(PLAIN)
+        _axes(ax)
+    for ax in list(axes.flat)[len(names):]:
+        ax.set_visible(False)
+    fig.supxlabel("Physical error probability per noise channel (%)", y=.077, fontsize=11)
+    fig.supylabel("Logical failures per memory experiment (%)", x=.013, fontsize=11)
+    note = ("Hollow downward triangles mark the 95% upper endpoint when zero failures were observed."
+            if any(r["num_errors"] == 0 for r in rows)
+            else "Each failure is a shot with an incorrect logical prediction. Lines connect simulated points.")
+    return [_save(fig, out_dir, "logical_error_rates.png", note)]
 
+
+def _point(rows, p):
+    choices = sorted({r["p"] for r in rows})
+    chosen = min(choices, key=lambda v: abs(v - .005)) if p is None else p
+    pts = [r for r in rows if r["p"] == chosen]
+    if not pts:
+        raise ValueError(f"no rows at p={chosen}; available values are {choices}")
+    return pts, chosen
+
+
+def plot_latency(rows: list[dict], out_dir: Path = FIGURES_DIR, p=None) -> Path:
+    pts, p = _point(rows, p)
+    names = list(dict.fromkeys(r["decoder"] for r in pts))
+    single = all(r["single_p50_us"] is not None for r in pts)
+    fig, axes = plt.subplots(1, 1 + int(single), figsize=(12, 5.7), squeeze=False)
+    fig.subplots_adjust(left=.08, right=.97, top=.70, bottom=.20, wspace=.27)
+    _header(fig, pts, "How decoding time scales with distance", f"physical error {p:.2%}")
+    _legend(fig, [_style(n) for n in names])
+    for i, ax in enumerate(axes.flat):
+        mode = "single_p50_us" if i else "us_per_shot"
+        for index, name in enumerate(names):
+            series = sorted((r for r in pts if r["decoder"] == name), key=lambda r: r["distance"])
+            _, color, marker = _style(name)
+            x = np.array([r["distance"] for r in series], float)
+            if i:
+                x += .06 * (index - (len(names) - 1) / 2)
+            y = [r[mode] for r in series]
+            ax.plot(x, y, color=color, marker=marker, lw=2, ms=6)
+            if i:
+                ax.vlines(x, y, [r["single_p95_us"] for r in series], color=color, lw=1.5)
+                ax.scatter(x, [r["single_p95_us"] for r in series], c=color, marker="_")
+        ax.set(title="Single call per shot" if i else "Batch decoding", xlabel="Code distance",
+               ylabel="Time per shot (µs)", yscale="log", xticks=sorted({r["distance"] for r in pts}))
+        ax.yaxis.set_major_locator(LogLocator(base=10, subs=[1, 2, 5]))
+        ax.yaxis.set_major_formatter(PLAIN)
+        ax.yaxis.set_minor_formatter(NullFormatter())
+        _axes(ax)
+    return _save(fig, out_dir, "runtime_scaling.png",
+                 "Batch points show amortized time. Single-call points show medians with whiskers to p95."
+                 if single else "Batch points show amortized time per shot.")
+
+
+def plot_tradeoff(rows, out_dir=FIGURES_DIR, p=None):
+    pts, p = _point(rows, p)
+    names = list(dict.fromkeys(r["decoder"] for r in pts))
+    distances = sorted({r["distance"] for r in pts})
+    fig, axes = plt.subplots(1, len(distances), figsize=(max(9, 4.0 * len(distances)), 5.7),
+                             sharey=True, squeeze=False)
+    fig.subplots_adjust(left=.08, right=.975, top=.70, bottom=.22, wspace=.2)
+    _header(fig, pts, "Accuracy and batch time at one operating point", f"physical error {p:.2%}")
+    _legend(fig, [_style(n) for n in names])
+    for ax, d in zip(axes.flat, distances):
+        for r in pts:
+            if r["distance"] == d:
+                _, color, marker = _style(r["decoder"])
+                _accuracy_points(ax, [r], [r["us_per_shot"]], color, marker, connect=False)
+        max_time = max(r["us_per_shot"] for r in pts if r["distance"] == d)
+        ax.set(title=f"Distance {d}", xlim=(0, max_time * 1.13))
+        ax.set_xlabel("Batch time per shot (µs)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=3))
+        ax.xaxis.set_major_formatter(PLAIN)
+        _axes(ax)
+    axes.flat[0].set_ylabel("Logical failures (%)")
+    return _save(fig, out_dir, "accuracy_runtime.png",
+                 "Lower and further left is better. Whiskers show 95% Wilson intervals for the failure rate.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("files", nargs="*", type=Path)
+    ap.add_argument("--out-dir", type=Path, default=FIGURES_DIR)
+    ap.add_argument("--p", type=float, help="noise level for the runtime and trade-off figures")
+    args = ap.parse_args()
     files = args.files or sorted(RESULTS_DIR.glob("bench_*.csv"))[-1:]
     if not files:
-        raise SystemExit("no results found; run `python -m src.evaluate` first")
+        ap.error("no benchmark CSV found; run python -m src.evaluate first")
     rows = load_rows(files)
-    for path in [*plot_threshold(rows), plot_latency(rows)]:
+    for path in [*plot_threshold(rows, args.out_dir), plot_latency(rows, args.out_dir, args.p),
+                 plot_tradeoff(rows, args.out_dir, args.p)]:
         print(f"wrote {path}")
 
 

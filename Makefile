@@ -7,8 +7,11 @@ endif
 
 DISTANCES ?= 3 5 7
 PS        ?= 0.001 0.003 0.005 0.007 0.01
-SHOTS     ?= 100000
-DECODERS  ?= pymatching union_find experimental
+SHOTS     ?= 50000
+DECODERS  ?= fault_join pymatching pymatching_correlated union_find
+SEED      ?= 20261121
+BASIS     ?= z
+GRID      = --distances $(DISTANCES) --ps $(PS) --shots $(SHOTS) --seed $(SEED) --basis $(BASIS)
 
 .PHONY: install data bench plots test all
 
@@ -16,10 +19,10 @@ install:
 	$(PY) -m pip install -e ".[dev]"
 
 data:
-	$(PY) -m src.data --distances $(DISTANCES) --ps $(PS) --shots $(SHOTS)
+	$(PY) -m src.data $(GRID)
 
 bench:
-	$(PY) -m src.evaluate --decoders $(DECODERS) --distances $(DISTANCES) --ps $(PS) --shots $(SHOTS)
+	$(PY) -m src.evaluate --decoders $(DECODERS) $(GRID)
 
 plots:
 	$(PY) -m src.plots
@@ -27,4 +30,6 @@ plots:
 test:
 	$(PY) -m pytest -q
 
-all: test bench plots
+all: test
+	$(MAKE) bench
+	$(MAKE) plots

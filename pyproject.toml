@@ -1,11 +1,13 @@
 [project]
 name = "syndrome-hunters-ecc"
 version = "0.1.0"
-description = "Surface-code decoder hackathon: baseline, union-find and experimental decoders"
+description = "FaultJoin surface-code decoder and reproducible Stim benchmarks"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "numpy==2.5.5",
+    "numba==0.68.1",
+    "scipy==1.18.1",
     "stim==1.16.0",
     "sinter==1.16.0",
     "pymatching==2.4.0",

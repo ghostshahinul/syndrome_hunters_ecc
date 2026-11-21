@@ -14,11 +14,17 @@ def surface_code_circuit(
     """Rotated surface-code memory experiment.
 
     Args:
-        distance: code distance d (odd, >= 3).
+        distance: code distance d (at least 2).
         p: physical error rate applied uniformly to every noise channel.
         rounds: syndrome-extraction rounds; defaults to d.
         basis: "z" or "x" memory experiment.
     """
+    if distance < 2:
+        raise ValueError("distance must be at least 2")
+    if rounds is not None and rounds < 1:
+        raise ValueError("rounds must be positive")
+    if not 0 <= p <= 1:
+        raise ValueError("physical error rate must be between 0 and 1")
     if basis not in ("x", "z"):
         raise ValueError(f"basis must be 'x' or 'z', got {basis!r}")
     return stim.Circuit.generated(

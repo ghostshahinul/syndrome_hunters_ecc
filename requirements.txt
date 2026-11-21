@@ -1,5 +1,7 @@
 # Mirrors pyproject.toml; prefer: pip install -e ".[dev]"
 numpy==2.5.5
+numba==0.68.1
+scipy==1.18.1
 stim==1.16.0
 sinter==1.16.0
 pymatching==2.4.0

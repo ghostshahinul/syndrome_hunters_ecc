@@ -1,0 +1,42 @@
+{
+  "created_utc": "2026-11-21T20:55:00.869314+00:00",
+  "config": {
+    "decoders": [
+      "fault_join",
+      "pymatching",
+      "pymatching_correlated",
+      "union_find"
+    ],
+    "distances": [
+      3,
+      5,
+      7
+    ],
+    "ps": [
+      0.005
+    ],
+    "shots": 20000,
+    "basis": "x",
+    "rounds": null,
+    "seed": 20261122,
+    "batch_size": 4096,
+    "repeats": 3,
+    "latency_shots": 256,
+    "data_dir": null,
+    "out_dir": "results"
+  },
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "cpu": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+  "packages": {
+    "stim": "1.16.0",
+    "pymatching": "2.4.0",
+    "numpy": "2.5.5",
+    "scipy": "1.18.1",
+    "numba": "0.68.1",
+    "matplotlib": "3.11.2"
+  },
+  "timing": "Median of repeated warmed serial batch passes. Sampling, scoring, setup and memory profiling excluded.",
+  "single_call": "Dedicated decode(syndrome) API for FaultJoin and both PyMatching modes. Median and p95.",
+  "memory": "Python-traced peak MiB on one warm batch. Native allocations may be invisible."
+}

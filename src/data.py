@@ -52,14 +52,15 @@ def save(samples: Samples, path: str | Path) -> Path:
     if path.exists():
         raise FileExistsError(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
-        dets=np.packbits(samples.detection_events, axis=1),
-        obs=np.packbits(samples.observable_flips, axis=1),
-        num_detectors=samples.detection_events.shape[1],
-        num_observables=samples.observable_flips.shape[1],
-        meta=json.dumps(samples.meta),
-    )
+    with path.open("xb") as archive:
+        np.savez_compressed(
+            archive,
+            dets=np.packbits(samples.detection_events, axis=1),
+            obs=np.packbits(samples.observable_flips, axis=1),
+            num_detectors=samples.detection_events.shape[1],
+            num_observables=samples.observable_flips.shape[1],
+            meta=json.dumps(samples.meta),
+        )
     return path
 
 
@@ -72,26 +73,33 @@ def load(path: str | Path) -> Samples:
     return Samples(dets, obs, meta)
 
 
-def default_path(distance: int, p: float, rounds: int, basis: str, seed: int | None) -> Path:
-    return DATA_DIR / f"d{distance}_r{rounds}_p{p:g}_{basis}_s{seed}.npz"
+def default_path(distance: int, p: float, rounds: int, basis: str, seed: int | None,
+                 shots: int | None = None) -> Path:
+    if shots is None:  # Original scaffold filenames.
+        return DATA_DIR / f"d{distance}_r{rounds}_p{p:g}_{basis}_s{seed}.npz"
+    return DATA_DIR / f"d{distance}_r{rounds}_p{p}_{basis}_s{seed}_n{shots}.npz"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--distances", type=int, nargs="+", default=[3, 5, 7])
     ap.add_argument("--ps", type=float, nargs="+", default=[0.001, 0.003, 0.005, 0.007, 0.01])
-    ap.add_argument("--shots", type=int, default=100_000)
-    ap.add_argument("--basis", default="z")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--shots", type=int, default=50_000)
+    ap.add_argument("--basis", choices=("x", "z"), default="z")
+    ap.add_argument("--rounds", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=20261121)
     args = ap.parse_args()
+    if args.shots < 1:
+        ap.error("--shots must be positive")
 
     for d in args.distances:
         for p in args.ps:
-            path = default_path(d, p, d, args.basis, args.seed)
+            rounds = d if args.rounds is None else args.rounds
+            path = default_path(d, p, rounds, args.basis, args.seed, args.shots)
             if path.exists():
                 print(f"skip  {path} (exists)")
                 continue
-            s = sample_surface_code(d, p, args.shots, basis=args.basis, seed=args.seed)
+            s = sample_surface_code(d, p, args.shots, rounds, args.basis, args.seed)
             save(s, path)
             print(f"wrote {path}  shots={s.shots}  detectors={s.detection_events.shape[1]}")
 

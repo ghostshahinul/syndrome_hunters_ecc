@@ -30,7 +30,13 @@ class Decoder(ABC):
 
     def decode(self, syndrome: np.ndarray) -> np.ndarray:
         """Single shot: (num_detectors,) bool -> (num_observables,) bool."""
-        return self.decode_batch(np.asarray(syndrome, dtype=bool)[None, :])[0]
+        return self.decode_batch(self._check_single(syndrome)[None, :])[0]
+
+    def _check_single(self, syndrome: np.ndarray) -> np.ndarray:
+        row = np.asarray(syndrome, dtype=bool)
+        if row.shape != (self.num_detectors,):
+            raise ValueError(f"expected one syndrome of length {self.num_detectors}, got {row.shape}")
+        return row
 
     def _check_input(self, detection_events: np.ndarray) -> np.ndarray:
         dets = np.asarray(detection_events, dtype=bool)

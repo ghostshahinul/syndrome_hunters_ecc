@@ -1,2 +1,3 @@
-Native (Rust/C++) implementations of hot loops go here, exposed to Python via a binding
-(e.g. pyo3/maturin or pybind11). Only add this if profiling shows the Python version is the bottleneck.
+The CPU kernels are written in Python and compiled by Numba. The sparse vote
+lives in [join.py](../src/decoders/join.py) and the cluster growth and logical
+frame extraction live in [union_find.py](../src/decoders/union_find.py).
