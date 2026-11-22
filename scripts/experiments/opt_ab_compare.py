@@ -7,7 +7,7 @@ pooled over all batches with a 95% Wilson CI, mean batch µs/shot, and optional 
 same loop as the reference.
 
 Configs are named on the command line from CONFIGS below, e.g.
-    python -m scripts.opt_ab_compare --configs hier hier_notable ufc ufc_notable --tag phaseC
+    python -m scripts.experiments.opt_ab_compare --configs hier hier_notable ufc ufc_notable --tag phaseC
 Writes results/optimization/<tag>_<ts>.csv.
 """
 

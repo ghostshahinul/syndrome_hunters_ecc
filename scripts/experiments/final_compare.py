@@ -4,7 +4,7 @@ Operating point: circuit-level p = 0.5%, d = 3/5/7/9, 5 batches x 50,000 shots (
 single thread, numba cache cleared. main's union_find / local / hierarchical modules are loaded
 from git (--main-rev) next to the branch's, so both are timed in the same process.
 
-    python -m scripts.final_compare [--main-rev REV]
+    python -m scripts.experiments.final_compare [--main-rev REV]
 Writes results/optimization/final_step5_<ts>.csv and .png.
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from scripts.opt_b_profile import load_old  # clears the numba cache on import
+from scripts.experiments.opt_b_profile import load_old  # clears the numba cache on import
 
 from src.decoders.cube3d.graph import build_detector_graph  # noqa: E402
 from src.decoders.cube3d.hierarchical import Hierarchical  # noqa: E402

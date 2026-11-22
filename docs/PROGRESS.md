@@ -586,7 +586,7 @@ Item 4 commit: `0f7054f` (pushed).
   reweighted edge, and the number of reweighted edges. The reference runs the identical
   algorithm and is bit-identical to numba, so the counts describe the numba runs exactly, and
   the numba kernels pay **zero cost** (they are unchanged).
-- **Script:** `scripts/opt_a_measure.py`. CSVs: `results/optimization/phaseA_20261121_235854.csv`
+- **Script:** `scripts/experiments/opt_a_measure.py`. CSVs: `results/optimization/phaseA_20261121_235854.csv`
   (time split) and `phaseA_counters_20261121_235854.csv`.
 
 **Time split** (single thread, best of 3, 50k shots, p = 0.5%, same shots):
@@ -685,7 +685,7 @@ Phase B commit: `dd31a12` (pushed).
 - **Golden:** the golden configs pin `table=False`, so they keep checking the pre-table outputs
   (unchanged).
 
-**Results** (`scripts/opt_ab_compare.py`, `results/optimization/phaseC_20261122_003716.csv`;
+**Results** (`scripts/experiments/opt_ab_compare.py`, `results/optimization/phaseC_20261122_003716.csv`;
 5 × 50k = 250k shots per point, p = 0.5%, single thread, same shots for every config):
 
 | d | share of shots answered by the table | Hierarchical µs, off → on | UF3D correlated µs, off → on | LER effect |
@@ -862,7 +862,7 @@ Step 0 commit on main: `aaf0e88` (pushed). **Main stays here for the demo.** Ste
 branch **`opt/overnight`**.
 
 ## Step 1: measure pass 2 (branch, 01:37 to 01:45)
-Script `scripts/opt2_measure.py`, CSV `results/optimization/final_step1_20261122_014401.csv`.
+Script `scripts/experiments/opt2_measure.py`, CSV `results/optimization/final_step1_20261122_014401.csv`.
 Setup: 50k shots, p = 0.5%, numba cache cleared, Best-performance mode, single thread. The fractions
 come from the instrumented reference, which is bit-identical to numba (new counters:
 `pass2_changed_obs`, `pass2_needed`).
@@ -975,7 +975,7 @@ Step 3 commit: `d700754` (branch).
 Step 4 commit: `1248dc4` (branch).
 
 ## Step 5: final benchmark and decision (branch, 02:17 to 02:25)
-Script `scripts/final_compare.py`. main's kernels (`aaf0e88`) were loaded from git and timed in the
+Script `scripts/experiments/final_compare.py`. main's kernels (`aaf0e88`) were loaded from git and timed in the
 same process as the branch's. p = 0.5%, d = 3/5/7/9, 5 × 50k = 250k shots, single thread, numba cache
 cleared, Best-performance mode. Outputs: `results/optimization/final_step5_20261122_021304.{csv,png}`.
 

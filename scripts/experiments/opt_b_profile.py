@@ -6,7 +6,7 @@ other. Both versions decode the same shots: same predictions are asserted, then 
 is timed single-thread, best of 3, interleaved. Growth rounds per shot (round-by-round vs
 executed with skip-ahead) come from the instrumented reference on a subsample.
 
-    python -m scripts.opt_b_profile [--shots N] [--old-rev REV]
+    python -m scripts.experiments.opt_b_profile [--shots N] [--old-rev REV]
 Writes results/optimization/phaseB_<ts>.csv.
 """
 

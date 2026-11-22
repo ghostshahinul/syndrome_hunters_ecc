@@ -9,7 +9,7 @@ p = 0.5% circuit-level, rounds = d, d = 5/7/9, 50,000 shots, seed 0.
    completed, lit count, clusters, whether pass 2 ran / was kept, clusters touched by a
    reweighted edge. Reported over all shots and over the shots Hierarchical sends to UF.
 
-    python -m scripts.opt_a_measure [--shots N]
+    python -m scripts.experiments.opt_a_measure [--shots N]
 Writes results/optimization/phaseA_<ts>.csv (time split) and phaseA_counters_<ts>.csv.
 """
 

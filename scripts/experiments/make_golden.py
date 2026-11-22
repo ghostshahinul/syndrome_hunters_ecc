@@ -5,7 +5,7 @@ events, and for each decoder config the predictions (packed observable bits), ok
 max_cluster, and an order-independent hash of the correction (when the engine can record
 one). Regenerate ONLY when an output change is intended, and say so in the commit.
 
-    python -m scripts.make_golden
+    python -m scripts.experiments.make_golden
 """
 
 from __future__ import annotations

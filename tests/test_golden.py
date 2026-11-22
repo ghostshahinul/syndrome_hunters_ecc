@@ -1,12 +1,12 @@
 """Speedups must not change results: compare every engine with the saved golden outputs
-(tests/golden/golden_outputs.npz, written by scripts/make_golden.py before Phase B)."""
+(tests/golden/golden_outputs.npz, written by scripts/experiments/make_golden.py before Phase B)."""
 
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from scripts.make_golden import CASES, TIER_P, engines, run_engine
+from scripts.experiments.make_golden import CASES, TIER_P, engines, run_engine
 from src.decoders.cube3d.graph import detector_graph
 
 GOLDEN = Path(__file__).parent / "golden" / "golden_outputs.npz"
@@ -15,7 +15,7 @@ GOLDEN = Path(__file__).parent / "golden" / "golden_outputs.npz"
 @pytest.fixture(scope="module")
 def golden():
     if not GOLDEN.exists():
-        pytest.skip("no golden file; run python -m scripts.make_golden")
+        pytest.skip("no golden file; run python -m scripts.experiments.make_golden")
     return np.load(GOLDEN)
 
 

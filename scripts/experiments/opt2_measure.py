@@ -7,7 +7,7 @@ has an endpoint among pass 1's visited nodes (then pass 2 must reproduce pass 1 
 Time split (numba, 1 thread, best of 3, same shots): plain UF (= pass 1), UF3D correlated
 (pass 1 + pass 2), the local tier alone and Hierarchical.
 
-    python -m scripts.opt2_measure
+    python -m scripts.experiments.opt2_measure
 Writes results/optimization/final_step1_<ts>.csv.
 """
 
