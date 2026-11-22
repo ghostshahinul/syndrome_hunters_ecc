@@ -324,3 +324,41 @@ def test_weighted_forest_plain_uf_exact_on_components(tier, d):
 def test_passes_validation():
     with pytest.raises(ValueError):
         UnionFind3DConfig(passes=4)
+
+
+
+# ---- Final round, Step 2: the exact pass-2 skip never changes any output --------------------
+@pytest.mark.parametrize("opts", [dict(), dict(table=True), dict(passes=3), dict(weighted_forest=True)],
+                         ids=lambda o: "+".join(o) or "default")
+@pytest.mark.parametrize("tier,d", CASES)
+def test_pass2_skip_is_exact(tier, d, opts):
+    g = detector_graph(tier, d, TIER_P[tier])
+    dets, _ = sample(tier, d, 1500 if d < 7 else 600, seed=900 + d)
+    on = UnionFind3D(g, UnionFind3DConfig(correlated=True, **opts)).run(dets, record_correction=True)
+    off = UnionFind3D(g, UnionFind3DConfig(correlated=True, pass2_skip=False, **opts)).run(dets,
+                                                                                         record_correction=True)
+    for f in ("predictions", "correction", "ok", "max_cluster"):
+        np.testing.assert_array_equal(getattr(on, f), getattr(off, f), err_msg=f)
+    ref = UnionFind3D(g, UnionFind3DConfig(correlated=True, **opts)).run(dets[:150], record_correction=True,
+                                                                         backend="reference")
+    np.testing.assert_array_equal(on.correction[:150], ref.correction)
+
+
+
+@pytest.mark.parametrize("gate", [3, 8])
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
+def test_pass2_gate_numba_equals_reference(tier, d, gate):
+    g = detector_graph(tier, d, TIER_P[tier])
+    uf = UnionFind3D(g, UnionFind3DConfig(correlated=True, pass2_gate=gate))
+    dets, _ = sample(tier, d, 300, seed=1000 + d)
+    a = uf.run(dets, record_correction=True)
+    r = uf.run(dets, record_correction=True, backend="reference")
+    np.testing.assert_array_equal(a.predictions, r.predictions)
+    np.testing.assert_array_equal(a.correction, r.correction)
+    np.testing.assert_array_equal(g.syndrome(a.correction), dets)
+    # shots whose largest pass-1 cluster is above the gate decode exactly as without the gate
+    plain = UnionFind3D(g).run(dets)
+    full = UnionFind3D(g, UnionFind3DConfig(correlated=True)).run(dets)
+    big = plain.max_cluster > gate
+    np.testing.assert_array_equal(a.predictions[big], full.predictions[big])
+    np.testing.assert_array_equal(a.predictions[~big], plain.predictions[~big])

@@ -857,3 +857,134 @@ Phase F commit: `b76623a` (pushed). That is the demo baseline.
   | Hierarchical | 414 | 0.828% [0.752, 0.911] | 18.05 | LER ×0.82, time ×2.05 |
 - **Figure fix:** `plot_accuracy_runtime`'s bottom margin now follows the number of footer lines; the
   single-panel demo figure's footer had overlapped the x-axis label.
+
+Step 0 commit on main: `aaf0e88` (pushed). **Main stays here for the demo.** Steps 1 and later are on
+branch **`opt/overnight`**.
+
+## Step 1: measure pass 2 (branch, 01:37 to 01:45)
+Script `scripts/opt2_measure.py`, CSV `results/optimization/final_step1_20261122_014401.csv`.
+Setup: 50k shots, p = 0.5%, numba cache cleared, Best-performance mode, single thread. The fractions
+come from the instrumented reference, which is bit-identical to numba (new counters:
+`pass2_changed_obs`, `pass2_needed`).
+
+| d | pass 2 runs | kept | **changes the prediction** | runs but no shortened edge touches a pass-1 node | pass 1 (plain UF) | pass 2 (≈ corr − plain) | local tier | Hierarchical | PyMatching |
+|---|---|---|---|---|---|---|---|---|---|
+| 5 | 98.09% | 18.56% | **0.682%** | 22.20% | 2.58 µs | 3.41 | 0.50 | 5.73 | 2.37 |
+| 7 | 100.00% | 43.20% | **0.638%** | 1.54% | 7.54 | 9.32 | 0.61 | 17.20 | 8.17 |
+| 9 | 100.00% | 64.37% | **0.552%** | 0.01% | 18.00 | 21.28 | 1.43 | 39.04 | 20.04 |
+
+**Readout**
+- **Pass 2 costs as much as pass 1** but changes the predicted observable on only about 0.6% of
+  shots. It is often "kept" (a different, lower-score correction) without changing the logical outcome.
+- **The exact skip (Step 2)** can only remove pass 2 on 22% of shots at d=5, 1.5% at d=7 and 0.01% at
+  d=9. Almost no effect at d ≥ 7.
+- **The real lever is Step 3:** a cheap predictor that finds the about 0.6% of shots where pass 2
+  matters. The best possible gate would cut Hierarchical to about pass 1 + local ≈ 0.98× PyMatching
+  (d=7) and 0.97× (d=9).
+
+Step 1 commit: `d98284e` (branch).
+
+## Step 2: exact pass-2 skip (branch, 01:46 to 01:49)
+- **Rule:** in `_uf_correlated_shot` and in the reference, pass 2 is skipped when no shortened partner
+  edge has an endpoint (the boundary excluded) among pass 1's visited nodes. Growth only touches edges
+  incident to visited nodes, so pass 2 would replay pass 1 exactly.
+- **Mechanics:** `_uf_shot` now always records its visited count (`work[23][0]`), and workspace slot 25
+  is the node marker. The config flag is `pass2_skip`, default **True**.
+- **Exactness, tested:** the saved golden outputs are unchanged. On vs off is identical (predictions,
+  corrections, ok, max_cluster) on 3 tiers × d = 3/5/7, with the default options, table, passes=3 and
+  weighted forest; also in Hierarchical (both gates). numba equals the reference.
+- **Skip rate** (Step 1): 22.2% of shots at d=5, 1.5% at d=7, 0.01% at d=9.
+- **Speedup** (`results/optimization/final_step2_20261122_014842.csv`, 250k shots, single thread):
+
+  | d | UF3D correlated: off → on | Hierarchical: off → on | PyMatching |
+  |---|---|---|---|
+  | 5 | 6.02 → 5.81 µs (−3.5%) | 5.84 → 5.74 (−1.7%) | 2.48 |
+  | 7 | 17.08 → 17.07 | 17.00 → 17.08 | 8.18 |
+  | 9 | 38.52 → 38.62 | 38.77 → 38.65 | 19.75 |
+- **Decision:** keep (exact, free). As expected it doesn't move d ≥ 7; Step 3 is the lever.
+
+Step 2 commit: `50acad6` (branch).
+
+## Step 3: approximate pass-2 gate (branch, 01:50 to 02:10)
+**Predictor analysis** (instrumented reference; 20k shots at d = 5/7, 10k at d=9; p = 0.5%). These are
+the fractions of shots where pass 2 *changes* or *helps* the prediction that each feature keeps (recall).
+The best feature is pass 1's **largest cluster**, which is free since pass 1 already computes it:
+
+| d | changes | helps | max_cluster > T: share of shots running pass 2 / helpful changes kept |
+|---|---|---|---|
+| 5 | 0.615% | 0.475% | T=3: 42% / 97.9%; T=4: 24% / 89.5%; T=5: 20% / 81% |
+| 7 | 0.590% | 0.480% | T=6: 48% / 99.0%; T=10: 29% / 86.5%; T=14: 17% / 70% |
+| 9 | 0.600% | 0.530% | T=13: 50% / 96.2%; T=19: 29% / 84.9%; T=25: 19% / 74% |
+
+Correction size or weight, the number of shortened edges touching or inside clusters, and the largest
+length drop were all weaker predictors.
+
+**Implementation:** `UnionFind3DConfig(pass2_gate=T)` runs pass 2 only if pass 1's largest cluster
+has more than T nodes. **`pass2_gate=-1` means auto, T = ⌊rounds²/6.5⌋** (1 / 3 / 7 / 12 at
+d = 3/5/7/9). It is in numba and the reference, which are bit-identical (tested), and shots above the
+threshold decode exactly as with no gate.
+
+**Threshold sweep** (Hierarchical, 250k shots, single thread; `results/optimization/final_step3_d*_*.csv`).
+Always-run CIs: d=5 [1.1848, 1.2711], d=7 [0.7999, 0.8712], d=9 [0.4696, 0.5247].
+
+| d | T | LER | µs (÷ PM) | within the always-run CI? |
+|---|---|---|---|---|
+| 5 | always / 2 / 3 / 4 / 5 | 1.2272 / 1.2276 / 1.2356 / 1.2476 / 1.2988% | 5.98 (2.50×) / 5.61 / 5.33 / 4.82 / 4.62 (1.94×) | yes / yes / yes / yes / **no** |
+| 7 | always / 4 / 5 / 6 / 8 | 0.8348 / 0.8372 / 0.8396 / 0.8464 / 0.8704% | 17.28 (2.11×) / 15.20 / 14.74 / 13.76 / 12.73 (1.55×) | yes / yes / yes / yes / barely |
+| 9 | always / 8 / 10 / 13 / 16 | 0.4964 / 0.4976 / 0.5028 / 0.5164 / 0.5344% | 38.92 (1.96×) / 34.31 / 32.79 / 30.41 / 27.66 (1.39×) | yes / yes / yes / yes / **no** |
+
+**Auto-rule validation** (`final_step3_auto_*.csv`, 250k shots):
+
+| d | Hierarchical, always run | Hierarchical, auto gate | PyMatching |
+|---|---|---|---|
+| 3 | 1.7032% · 0.47 µs | 1.7032% · 0.48 µs | 1.6560% · 0.29 |
+| 5 | 1.2272% [1.185, 1.271] · 5.67 µs (2.32×) | **1.2356% [1.193, 1.280] · 4.89 µs (2.00×)** | 1.3828% [1.338, 1.429] · 2.44 |
+| 7 | 0.8348% [0.800, 0.871] · 17.07 µs (2.07×) | **0.8588% [0.823, 0.896] · 13.20 µs (1.60×)** | 1.0348% [0.996, 1.075] · 8.26 |
+| 9 | 0.4964% [0.470, 0.525] · 38.86 µs (1.94×) | **0.5108% [0.484, 0.540] · 31.13 µs (1.55×)** | 0.6696% [0.638, 0.702] · 20.07 |
+
+**Decision:** the auto gate **passes** (LER within the always-run CI at d = 3/5/7/9; the lead over plain
+PyMatching is still non-overlapping). It is now the default for Hierarchical's deep tier and for
+`uf3d_correlated`; plain `UnionFind3DConfig` stays ungated, and the golden configs are pinned to no gate.
+Gain: −14% (d=5), −23% (d=7), −20% (d=9) Hierarchical time. Still 1.55–2.0× PyMatching.
+**Caveat:** the rule was fitted at p = 0.5% only; at lower p clusters are smaller, so pass 2 runs less often.
+
+Step 3 commit: `d700754` (branch).
+
+## Step 4: frontier tracking (branch, 02:08 to 02:16). Prototype not faster, not adopted.
+- **Prototype:** a scratch copy of `union_find.py`, not committed, with per-cluster frontier
+  incidence lists ((node, edge) entries, linked lists spliced in O(1) on union, grown edges pruned
+  lazily) and a root list instead of the per-node root recomputation each round.
+- **Bit-identical** to the current kernel: predictions, corrections, ok, max_cluster on 3 tiers ×
+  d = 3/5/7/9 × 4 configs (plain, correlated, smallest-growth, gated), 1,500 shots each.
+- **Not faster** (same run, 50k shots, single thread; µs/shot current → frontier):
+  - plain UF: d=5 2.56 → 2.62, d=7 7.52 → 7.60, d=9 17.63 → 17.30 (0.98 / 0.99 / 1.02×);
+  - correlated UF: 5.79 → 6.07, 16.82 → 17.21, 38.95 → 38.61 (0.96 / 0.98 / 1.01×).
+- **Why:** a stage profile (timing-only kernel variants, same run) shows where plain UF's time goes:
+
+  | d | extracting lits | growth (incl. lits) | growth + peeling |
+  |---|---|---|---|
+  | 5 | 0.39 µs | 1.82 | 2.53 |
+  | 7 | 0.56 | 5.55 | 7.54 |
+  | 9 | 0.92 | 13.47 | 17.73 |
+
+  Growth is 70–73% and peeling 25–28%. The growth time is the random-access support increments on
+  the incident edges of active clusters (about 6 rounds per pass), not wasted scans, so restricting
+  the scan to frontier lists saves nothing.
+- **Decision:** revert, per the plan; the repo files were never changed.
+
+Step 4 commit: `1248dc4` (branch).
+
+## Step 5: final benchmark and decision (branch, 02:17 to 02:25)
+Script `scripts/final_compare.py`. main's kernels (`aaf0e88`) were loaded from git and timed in the
+same process as the branch's. p = 0.5%, d = 3/5/7/9, 5 × 50k = 250k shots, single thread, numba cache
+cleared, Best-performance mode. Outputs: `results/optimization/final_step5_20261122_021304.{csv,png}`.
+
+| d | PyMatching | Correlated PM | UnionFind3D | **Hierarchical (main)** | **Hierarchical (branch)** | branch vs main | branch ÷ PM |
+|---|---|---|---|---|---|---|---|
+| 3 | 1.656% · 0.31 µs | 1.625% · 0.88 | 1.667% · 0.59 | 1.703% [1.653, 1.755] · 0.50 | 1.703% (identical) · 0.48 | −4% | 1.55× |
+| 5 | 1.383% [1.338, 1.429] · 2.49 | 1.076% · 7.10 | 1.523% · 2.64 | 1.227% [1.185, 1.271] · 5.84 | 1.236% [1.193, 1.280] · 5.00 | **−14%** | 2.01× |
+| 7 | 1.035% [0.996, 1.075] · 8.43 | 0.609% · 23.52 | 1.222% · 7.77 | 0.835% [0.800, 0.871] · 17.59 | 0.859% [0.823, 0.896] · 13.49 | **−23%** | 1.60× |
+| 9 | 0.670% [0.638, 0.702] · 20.23 | 0.299% · 57.82 | 0.846% · 18.21 | 0.496% [0.470, 0.525] · 39.53 | 0.511% [0.484, 0.540] · 31.46 | **−20%** | 1.56× |
+
+**Decision: merge.** The branch is faster (−14 to −23% at d = 5–9) with LER inside main's 95% CI at every
+d, the suite is green, and the lead over plain PyMatching still has non-overlapping CIs at d = 5/7/9.

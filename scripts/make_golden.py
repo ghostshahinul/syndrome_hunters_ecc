@@ -44,8 +44,9 @@ def pack_bits(pred: np.ndarray) -> np.ndarray:
 def engines(g):
     yield "uf", UnionFind3D(g, UnionFind3DConfig())
     yield "uf_corr", UnionFind3D(g, UnionFind3DConfig(correlated=True))
-    yield "hier_whole_corr", Hierarchical(g, HierarchicalConfig(gate="whole_shot", table=False))
-    yield "hier_partial_corr", Hierarchical(g, HierarchicalConfig(gate="partial", table=False))
+    corr = UnionFind3DConfig(correlated=True)  # pinned: no pass-2 gate (the pre-gate behaviour)
+    yield "hier_whole_corr", Hierarchical(g, HierarchicalConfig(gate="whole_shot", table=False, uf=corr))
+    yield "hier_partial_corr", Hierarchical(g, HierarchicalConfig(gate="partial", table=False, uf=corr))
     yield "hier_whole_plain", Hierarchical(g, HierarchicalConfig(gate="whole_shot", uf=UnionFind3DConfig(),
                                                                  table=False))
     yield "ens4_corr", UFEnsemble(g, EnsembleConfig(M=4))

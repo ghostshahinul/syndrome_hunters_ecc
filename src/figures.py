@@ -65,6 +65,8 @@ STYLES: dict[str, Style] = {
     "UF3D correlated":        Style("#e87ba4", "d"),
     "UF3D ensemble":          Style("#e87ba4", ">"),
     "UF3D correlated ensemble": Style("#e87ba4", "<"),
+    # an earlier build of Hierarchical, drawn in neutral ink next to the current one
+    "Hierarchical (main)":    Style("#898781", "8"),
 }
 FALLBACK = Style(MUTED, "o")
 
