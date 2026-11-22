@@ -52,7 +52,26 @@ CONFIGS = {
     "hier": _h(),
     "hier_notable": _h(table=False),
     # Phase D (cluster-local pass 2) configs were removed with the reverted code; see PROGRESS.md
+    # Phase E
+    "ufc_e1": _uf(correlated=True, table=True, float_score=True),
+    "ufc_e2": _uf(correlated=True, table=True, weighted_forest=True),
+    "ufc_e4": _uf(correlated=True, table=True, passes=3),
+    "uf_s8": _uf(scale=8, skip_ahead=True),
+    "uf_s16": _uf(scale=16, skip_ahead=True),
+    "ufc_s8": _uf(correlated=True, table=True, scale=8, skip_ahead=True),
+    "ufc_s16": _uf(correlated=True, table=True, scale=16, skip_ahead=True),
+    "ufc_s8_rr": _uf(correlated=True, table=True, scale=8),
+    "hier_partial": _h(gate="partial"),
+    **{f"hier_K{k}": _h(K=k) for k in range(2, 11)},
 }
+
+
+def _ens(M):
+    from src.decoders.cube3d.ensemble import EnsembleConfig, UFEnsemble
+    return lambda g: UFEnsemble(g, EnsembleConfig(M=M, correlated=True, parallel="shots"))
+
+
+CONFIGS.update({f"ens{m}": _ens(m) for m in (1, 2, 3)})
 
 
 def register(name, factory):

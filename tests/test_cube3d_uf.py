@@ -285,3 +285,42 @@ def test_pack_syndrome_matches_numba_lookup():
     for lits, want in (([9, 3], True), ([4, 7, 2, 1], True), ([5], True), ([5, 6], False), ([], False)):
         hit, _ = table_lookup(np.array(lits + [0] * (4 - len(lits)), np.int32), len(lits), keys, vals)
         assert hit == want, lits
+
+
+# ---- Phase E options: each must stay bit-identical to the reference and syndrome-consistent
+E_OPTIONS = [dict(float_score=True), dict(weighted_forest=True), dict(passes=3),
+             dict(float_score=True, weighted_forest=True, passes=3)]
+
+
+@pytest.mark.parametrize("opts", E_OPTIONS, ids=lambda o: "+".join(o))
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
+def test_phase_e_options_numba_equals_reference(tier, d, opts):
+    g = detector_graph(tier, d, TIER_P[tier])
+    uf = UnionFind3D(g, UnionFind3DConfig(correlated=True, **opts))
+    dets, _ = sample(tier, d, 250, seed=600 + d)
+    ref = uf.run(dets, record_correction=True, backend="reference")
+    fast = uf.run(dets, record_correction=True, backend="numba")
+    np.testing.assert_array_equal(fast.predictions, ref.predictions)
+    np.testing.assert_array_equal(fast.correction, ref.correction)
+    np.testing.assert_array_equal(fast.max_cluster, ref.max_cluster)
+    assert fast.ok.all()
+    np.testing.assert_array_equal(g.syndrome(fast.correction), dets)
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_weighted_forest_plain_uf_exact_on_components(tier, d):
+    g = detector_graph(tier, d, TIER_P[tier])
+    uf = UnionFind3D(g, UnionFind3DConfig(weighted_forest=True))
+    edges = np.arange(g.n_edges)
+    res = uf.run(dets_for_edges(g, edges), record_correction=True)
+    np.testing.assert_array_equal(res.predictions, g.edge_obs[edges])
+    dets, _ = sample(tier, d, 500, seed=d + 70)
+    a = uf.run(dets, record_correction=True)
+    np.testing.assert_array_equal(g.syndrome(a.correction), dets)
+    r = uf.run(dets[:120], record_correction=True, backend="reference")
+    np.testing.assert_array_equal(a.correction[:120], r.correction)
+
+
+def test_passes_validation():
+    with pytest.raises(ValueError):
+        UnionFind3DConfig(passes=4)

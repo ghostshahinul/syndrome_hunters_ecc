@@ -186,3 +186,15 @@ def test_table_numba_bit_identical(tier, d, gate):
     ref, fast = h.run(dets, backend="reference"), h.run(dets, backend="numba")
     for f in ("predictions", "fast", "uf_called", "lit_count", "cleared", "ok", "max_cluster", "table"):
         np.testing.assert_array_equal(getattr(fast, f), getattr(ref, f), err_msg=f)
+
+
+@pytest.mark.parametrize("opts", [dict(float_score=True), dict(weighted_forest=True), dict(passes=3)],
+                         ids=lambda o: "+".join(o))
+@pytest.mark.parametrize("gate", GATES)
+def test_deep_tier_options_numba_equals_reference(gate, opts):
+    g = detector_graph("circuit", 5, 0.005)
+    h = Hierarchical(g, HierarchicalConfig(gate=gate, uf=UnionFind3DConfig(correlated=True, **opts)))
+    dets, _ = sample("circuit", 5, 200, seed=77)
+    ref, fast = h.run(dets, backend="reference"), h.run(dets, backend="numba")
+    for f in ("predictions", "fast", "uf_called", "ok", "max_cluster", "table"):
+        np.testing.assert_array_equal(getattr(fast, f), getattr(ref, f), err_msg=f)

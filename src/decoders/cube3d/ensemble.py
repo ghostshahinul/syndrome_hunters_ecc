@@ -91,14 +91,16 @@ def _multi_work(M, n, E):
             np.empty((M, n), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, n + 1), np.bool_),
             np.zeros((M, 1), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, 1), np.int32),
             np.zeros((M, E), np.int32), np.empty((M, E), np.int32), np.zeros((M, n + 1), np.int32),
-            np.empty((M, E), np.int32), np.empty((M, n), np.int32), np.empty((M, n), np.int32))
+            np.empty((M, E), np.int32), np.empty((M, n), np.int32), np.empty((M, n), np.int32),
+            np.empty((M, n + 1), np.int32), np.empty((M, E), np.int64), np.zeros((M, E), np.bool_))
 
 
 @njit(cache=True)
 def _view(W, v):
     return (W[0][v], W[1][v], W[2][v], W[3][v], W[4][v], W[5][v], W[6][v], W[7][v], W[8][v], W[9][v],
             W[10][v], W[11][v], W[12][v], W[13][v], W[14][v], W[15][v], W[16][v], W[17][v], W[18][v],
-            W[19][v], W[20][v], W[21][v], W[22][v], W[23][v], W[24][v], W[25][v], W[26][v])
+            W[19][v], W[20][v], W[21][v], W[22][v], W[23][v], W[24][v], W[25][v], W[26][v],
+            W[27][v], W[28][v], W[29][v])
 
 
 @njit(cache=True)
@@ -109,7 +111,7 @@ def _variant(lits, nlit, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, 
     if correlated:
         b, ok = _uf_correlated_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits,
                                     none, smallest[v], work, cptr, cidx, clen, ccredit, len2[v], mod[v],
-                                    inside[v], keep[v], stat_keep[v])
+                                    inside[v], keep[v], stat_keep[v], False, False, lengths[v], ccredit, 2)
     else:
         b, ok = _uf_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits, none,
                          smallest[v], work)
@@ -251,7 +253,8 @@ class UFEnsemble:
         g, t, c = self.graph, self.tables, self.config
         best = None
         for v in range(c.M):
-            tv = replace(t, length=self.lengths[v], smallest=bool(self.smallest[v]))
+            tv = replace(t, length=self.lengths[v], smallest=bool(self.smallest[v]),
+                         score_len=self.lengths[v].astype(np.int64))
             fn = uf_correlated_shot_reference if c.correlated else uf_decode_shot_reference
             b, flipped, ok = fn(g, tv, row)
             score = correlated_score(t, flipped) if c.correlated else int(sum(int(t.length[e]) for e in flipped))

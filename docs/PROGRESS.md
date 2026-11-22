@@ -728,3 +728,43 @@ Phase C commit: `406f75a` (pushed).
   the labelling, marking and XOR bookkeeping cost more than they save.
 - **Why there's little to save:** pass 2 still has to decode about 60% of the clusters (13 of 22 at
   d=9), and growing a subset of clusters costs about the same per cluster as growing them all.
+
+Phase D commit: `4887ecf` (pushed).
+
+## Phase E: accuracy options (00:50 to 01:01)
+**What was built:** three opt-in `UnionFind3DConfig` flags, each in numba and in the reference,
+**bit-identical** (tested on 3 tiers × d = 3/5, alone and combined, plus Hierarchical with each
+as its deep tier). The defaults are off, so the golden outputs are unchanged.
+- **`float_score` (E1):** the pass-1 vs pass-2 score on fine weights, w_e and the pair credit
+  max(0, w_e + w_f − w_joint), as fixed-point int64 (w·2²⁴). Integer sums don't depend on the
+  summation order, which keeps numba and the reference bit-identical.
+- **`weighted_forest` (E2):** peel on a Kruskal min-length spanning forest of the grown edges,
+  ascending (length, id), with boundary edges only for odd clusters.
+- **`passes=3` (E4):** when pass 2 was kept, reweight from pass 2's correction and decode once more,
+  with the score check again.
+
+**Benchmarks** (250k shots, p = 0.5%, single thread, same shots in each run):
+`results/optimization/phaseE1234_20261122_005357.csv` and `phaseE56_20261122_010045.csv`.
+
+| config | d=5 LER · µs | d=7 LER · µs | d=9 LER · µs | decision |
+|---|---|---|---|---|
+| PyMatching | 1.3828% · 2.41 | 1.0348% · 8.36 | 0.6696% · 20.34 | reference |
+| UF3D correlated (current default) | 1.2260% · 6.07 | 0.8348% · 17.41 | 0.4964% · 39.96 | baseline |
+| E1 float score | 1.2220% · 6.17 | 0.8336% · 17.37 | 0.4924% · 39.82 | **off**: no measurable gain |
+| E2 weighted forest | 1.2120% · 7.57 | 0.7976% [0.764, 0.833] · 20.95 | 0.4608% [0.435, 0.488] · 47.23 | **off**: −5–7% LER for +18–20% time |
+| E3 S=8 (skip-ahead) | 1.1452% · 6.62 | 0.7800% [0.746, 0.815] · 22.10 | 0.4524% [0.427, 0.480] · 53.96 | **off**: −7–9% LER for +27–35% time |
+| E3 S=8 (round by round) | same LER · 7.41 | · 22.20 | · 51.86 | skip-ahead gives no speed gain even at S=8 |
+| E3 S=16 (skip-ahead) | 1.1680% · 7.03 | 0.7740% · 25.61 | 0.4488% · 68.00 | **off**: no better than S=8, slower |
+| E4 pass 3 | 1.2020% · 6.86 | 0.8152% · 21.07 | 0.4864% · 51.03 | **off**: −2–4% LER for +20–27% time |
+| plain UF, S=4 / 8 / 16 | 1.523 / 1.459 / 1.470% | 1.222 / 1.152 / 1.150% | 0.846 / 0.810 / 0.794% | plain UF never beats PyMatching |
+| E5 partial gate (correlated deep tier) | 1.4012% · 5.20 | 1.0860% · 16.82 | 0.7396% · 38.39 | **rejected**: much worse |
+| E5 K = 2…10 (whole-shot) | 1.2260–1.2304% · 5.66–6.30 | identical · 17.5–17.7 | identical · 39.8–40.5 | **keep K=6** (no effect at d ≥ 7) |
+| E6 ensemble M = 1 / 2 / 3 | 1.226 / 1.169 / 1.144% · 6.7 / 14.6 / 21.0 | 0.835 / 0.823 / 0.790% · 17.8 / 41.3 / 60.7 | 0.496 / 0.483 / 0.485% · 40.5 / 97.0 / 142.5 | **off**: 2.2–3.5× time |
+
+- **E5 at d=3:** K=2 is more accurate (1.608% vs 1.703%) but 29% slower; K ≥ 5 equals K=6.
+- **E4 run/win rate:** pass 3 runs on every shot where pass 2 was kept (43% at d=7, 64% at d=9; the
+  Phase A rates). Its overall gain is the 2–4% shown above.
+
+**Outcome:** none of the accuracy options is adopted as a default. **Every** accuracy gain costs
+time, and time is the binding constraint for the ≤ 1.0× target. The accurate variants (E2, E3 S=8,
+or both) remain available as options. Correlated UF itself is still 1.96–2.08× PyMatching at d = 7/9.

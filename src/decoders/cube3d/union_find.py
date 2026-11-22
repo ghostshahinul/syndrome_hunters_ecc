@@ -57,6 +57,9 @@ class UnionFind3DConfig:
     correlated: bool = False  # two-pass: reweight partners of pass-1 edges, decode again
     skip_ahead: bool = False  # exact skip-ahead growth (same results; pays off only at large scale)
     table: bool = False       # answer 1-4-event shots that match a single DEM fault from a table
+    float_score: bool = False  # E1: pass-selection score on fine weights (fixed point w * 2^24)
+    weighted_forest: bool = False  # E2: peel on a min-length (Kruskal) spanning forest
+    passes: int = 2           # E4: 3 = reweight again from pass 2's correction (if it was kept)
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
@@ -65,6 +68,8 @@ class UnionFind3DConfig:
             raise ValueError(f"growth must be one of {UF_GROWTH}, got {self.growth!r}")
         if self.scale < 1:
             raise ValueError(f"scale must be >= 1, got {self.scale}")
+        if self.passes not in (2, 3):
+            raise ValueError(f"passes must be 2 or 3, got {self.passes}")
 
 
 @dataclass(frozen=True, eq=False)
@@ -77,6 +82,10 @@ class UFTables:
     corr_len: np.ndarray | None = None  # (P,) int32 length of f given e is in the correction
     corr_credit: np.ndarray | None = None  # (P,) int32 max(0, L_e + L_f - L_joint): pair bonus
     skip: bool = False   # skip-ahead growth path in the numba kernel
+    wforest: bool = False  # peel on a Kruskal min-length spanning forest
+    passes: int = 2        # correlated passes (2 or 3)
+    score_len: np.ndarray | None = None     # (E,) int64 edge cost in the pass-selection score
+    score_credit: np.ndarray | None = None  # (P,) int64 pair credit in the pass-selection score
 
 
 def length_of(w: np.ndarray, w_min: float, scale: int) -> np.ndarray:
@@ -104,10 +113,51 @@ def build_uf_tables(g: DetectorGraph3D, scale: int = 4, growth: str = "all") -> 
         if len(idx) else np.zeros(0, np.int32)
     return UFTables(length, b_inc, growth == "smallest", np.ascontiguousarray(ptr, np.int32),
                     np.ascontiguousarray(idx, np.int32), corr_len.astype(np.int32),
-                    credit.astype(np.int32))
+                    credit.astype(np.int32), score_len=length.astype(np.int64),
+                    score_credit=np.asarray(credit, np.int64))
+
+
+FIXED_POINT = float(1 << 24)
+
+
+def float_score_tables(g: DetectorGraph3D, t: UFTables) -> tuple[np.ndarray, np.ndarray]:
+    """E1: the pass-selection score on fine weights: w_e and the pair credit
+    max(0, w_e + w_f - w_joint) as fixed-point int64 (w * 2^24). Integer sums do not depend on
+    the summation order, so numba and the reference stay bit-identical."""
+    w = g.edge_weight
+    src = np.repeat(np.arange(g.n_edges), np.diff(t.corr_ptr))
+    joint = g.corr_joint if g.corr_joint is not None else np.zeros(0)
+    if len(t.corr_idx):
+        pj = np.clip(joint, 1e-15, 0.5 - 1e-12)
+        cred = np.maximum(0.0, w[src] + w[t.corr_idx] - np.log((1 - pj) / pj))
+    else:
+        cred = np.zeros(0)
+    return (np.rint(w * FIXED_POINT).astype(np.int64), np.rint(cred * FIXED_POINT).astype(np.int64))
 
 
 # ---- reference (idiomatic Python) -------------------------------------------------------
+def _kruskal_forest(g: DetectorGraph3D, t: UFTables, grown, allowed) -> set[int]:
+    """E2: edges of a min-length spanning forest of the grown edges (ascending (length, id);
+    boundary edges only where allowed(e))."""
+    B = g.boundary
+    par: dict[int, int] = {}
+
+    def f(x):
+        par.setdefault(x, x)
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+
+    forest = set()
+    for e in sorted((e for e in grown if allowed(e)), key=lambda e: (int(t.length[e]), e)):
+        a, b = f(int(g.edge_u[e])), f(int(g.edge_v[e]) if int(g.edge_v[e]) != B else B)
+        if a != b:
+            par[a] = b
+            forest.add(e)
+    return forest
+
+
 def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarray,
                              stats: dict | None = None) -> tuple[int, list[int], bool]:
     """Decode one shot. Returns (observable bits, sorted flipped edge ids, ok).
@@ -205,11 +255,13 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
 
     # Peeling on a canonical spanning forest of the grown edges. Only odd clusters may
     # use their grown boundary edges; an even cluster is peeled on its internal edges.
+    def allowed(e):
+        return not (int(g.edge_v[e]) == B and parity[find(int(g.edge_u[e]))] == 0)
+
+    forest_edges = _kruskal_forest(g, t, grown, allowed) if t.wforest else {e for e in grown if allowed(e)}
     adj: dict[int, list[int]] = defaultdict(list)
-    for e in sorted(grown):
+    for e in sorted(forest_edges):
         u, v = int(g.edge_u[e]), int(g.edge_v[e])
-        if v == B and parity[find(u)] == 0:
-            continue
         adj[u].append(e)
         adj[v].append(e)
     marked = {B}
@@ -266,15 +318,18 @@ def correlated_lengths(t: UFTables, flipped) -> np.ndarray:
 
 
 def correlated_score(t: UFTables, flipped) -> int:
-    """Correlated cost of a correction: sum of base lengths minus the pair credit of every
-    unordered DEM partner pair (e, f) that it contains."""
+    """Correlated cost of a correction: sum of edge costs minus the pair credit of every
+    unordered DEM partner pair (e, f) that it contains. Costs are t.score_len/score_credit
+    (integer lengths by default; fixed-point fine weights with float_score)."""
+    slen = t.score_len if t.score_len is not None else t.length
+    scred = t.score_credit if t.score_credit is not None else t.corr_credit
     inside = set(int(e) for e in flipped)
-    score = sum(int(t.length[e]) for e in inside)
+    score = sum(int(slen[e]) for e in inside)
     for e in inside:
         for k in range(t.corr_ptr[e], t.corr_ptr[e + 1]):
             f = int(t.corr_idx[k])
             if f > e and f in inside:
-                score -= int(t.corr_credit[k])
+                score -= int(scred[k])
     return score
 
 
@@ -286,17 +341,28 @@ def uf_correlated_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.n
     bits, flipped, ok = uf_decode_shot_reference(g, t, dets_row, st1)
     result = (bits, flipped, ok, st1)
     len2 = correlated_lengths(t, flipped)
-    ran = kept = False
+    ran = kept = ran3 = kept3 = False
     rounds2 = 0
     if not np.array_equal(len2, t.length):
         ran = True
         st2: dict = {}
         b2, f2, ok2 = uf_decode_shot_reference(g, replace(t, length=len2), dets_row, st2)
         rounds2 = st2["rounds"]
-        if correlated_score(t, f2) < correlated_score(t, flipped):
+        sc2 = correlated_score(t, f2)
+        if sc2 < correlated_score(t, flipped):
             result = (b2, f2, ok2, st2)
             kept = True
+            if t.passes >= 3:  # E4: reweight again from pass 2's correction
+                len3 = correlated_lengths(t, f2)
+                if not np.array_equal(len3, t.length):
+                    ran3 = True
+                    st3: dict = {}
+                    b3, f3, ok3 = uf_decode_shot_reference(g, replace(t, length=len3), dets_row, st3)
+                    if correlated_score(t, f3) < sc2:
+                        result = (b3, f3, ok3, st3)
+                        kept3 = True
     if stats is not None:
+        stats.update(pass3_ran=ran3, pass3_kept=kept3)
         stats.update(result[3])
         # pass-1 clusters that contain an endpoint of a reweighted edge
         changed = np.flatnonzero(len2 != t.length)
@@ -355,7 +421,10 @@ def uf_work(n, E):
             np.zeros(n + 1, np.int32),           # 23 (unused; kept for a stable workspace layout)
             np.empty(E, np.int32),               # 24 (unused; kept for a stable workspace layout)
             np.empty(n, np.int32),               # 25 (unused; kept for a stable workspace layout)
-            np.empty(n, np.int32))               # 26 lit-index buffer for callers
+            np.empty(n, np.int32),               # 26 lit-index buffer for callers
+            np.empty(n + 1, np.int32),           # 27 Kruskal union-find parents (weighted forest)
+            np.empty(E, np.int64),               # 28 Kruskal sort keys (length * E + id)
+            np.zeros(E, np.bool_))               # 29 forest edge flags
 
 
 @njit(cache=True)
@@ -372,8 +441,10 @@ def extract_lits(row, buf):
 
 @njit(cache=True)
 def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work,
-             skip=False):
+             skip=False, wforest=False):
     """UF on the detection events lits[:nlit] (ascending order not required).
+    wforest=True (E2): peel on a min-length spanning forest of the grown edges (Kruskal,
+    ascending (length, id); boundary edges only for odd clusters) instead of the BFS forest.
 
     Two exact growth paths (same grown edges and clusters, so bit-identical results):
       skip=False  round by round, one pass per round (fastest at the default S = 4);
@@ -385,7 +456,7 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
                   round), so this pays off only at large S."""
     (parent, rank, parity, touches, size, in_cluster, visited, support, grown, newly,
      active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat, flips, nflips,
-     rate, frontier, rem, gb, sortbuf, _litbuf) = work
+     rate, frontier, rem, gb, sortbuf, _litbuf, kpar, kkeys, forest) = work
     n = in_cluster.shape[0] - 1
     B = n
     D = inc_edge.shape[1]
@@ -519,6 +590,29 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
     # the cluster nodes in ascending id; neighbors in ascending edge id. (Phase B tried sorted
     # lists of the visited nodes and grown boundary edges instead of these scans; both were
     # slower at d <= 9, so the scans stay.)
+    nk = 0
+    if wforest:
+        E = edge_u.shape[0]
+        for i in range(ntouched):
+            e = touched[i]
+            if not grown[e]:
+                continue
+            if edge_v[e] == B and parity[_find(parent, edge_u[e])] == 0:
+                continue
+            kkeys[nk] = np.int64(length[e]) * E + e
+            nk += 1
+        ks = kkeys[:nk]
+        ks.sort()
+        for i in range(nvis):
+            kpar[visited[i]] = visited[i]
+        kpar[B] = B
+        for i in range(nk):
+            e = np.int32(ks[i] % E)
+            a = _find(kpar, edge_u[e])
+            b = _find(kpar, edge_v[e])
+            if a != b:
+                kpar[a] = b
+                forest[e] = True
     norder = 0
     for idx in range(-1, n):
         root = B if idx < 0 else idx
@@ -535,7 +629,7 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
             if x == B:
                 for j in range(b_inc.shape[0]):
                     e = b_inc[j]
-                    if not grown[e]:
+                    if not (forest[e] if wforest else grown[e]):
                         continue
                     y = edge_u[e]
                     if marked[y] or parity[_find(parent, y)] == 0:
@@ -552,7 +646,7 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
                     e = inc_edge[x, j]
                     if e < 0:
                         break
-                    if not grown[e]:
+                    if not (forest[e] if wforest else grown[e]):
                         continue
                     y = edge_v[e] if edge_u[e] == x else edge_u[e]
                     if y == B and parity[_find(parent, x)] == 0:
@@ -612,12 +706,13 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
         e = touched[i]
         support[e] = 0
         grown[e] = False
+        forest[e] = False
     return bits, ok
 
 
 @njit(parallel=True, cache=True)
 def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
-              smallest, out_size, skip, tkeys, tvals, out_table):
+              smallest, out_size, skip, tkeys, tvals, out_table, wforest):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -633,7 +728,7 @@ def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out
                 out_table[s] = True
                 continue
             b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                             smallest, work, skip)
+                             smallest, work, skip, wforest)
             out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = work[18][0]
@@ -661,13 +756,14 @@ def _corr_score(flips, nf, length, cptr, cidx, ccredit, inside):
 
 @njit(cache=True)
 def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
-                        work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, skip=False):
+                        work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, skip, wforest,
+                        slen, scred, passes):
     """Pass 1 with `length`; pass 2 with the partners of pass-1 edges shortened; keep pass 2
     only if its correlated score is strictly lower. `len2` must equal `length` on entry and
     is restored. On return work[19..20] (flips) and work[18] (max cluster) describe the
     kept pass."""
     b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work,
-                     skip)
+                     skip, wforest)
     flips = work[19]
     nf1 = work[20][0]
     nm = 0
@@ -683,28 +779,59 @@ def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, 
                 len2[f] = L
     if nm == 0:
         return b, ok
-    score1 = _corr_score(flips, nf1, length, cptr, cidx, ccredit, inside)
+    score1 = _corr_score(flips, nf1, slen, cptr, cidx, scred, inside)
     for i in range(nf1):
         keep[i] = flips[i]
     stat_keep[0] = work[18][0]
     b2, ok2 = _uf_shot(lits, nlit, s, edge_u, edge_v, len2, inc_edge, b_inc, obs_bits, corr, smallest, work,
-                       skip)
+                       skip, wforest)
     for i in range(nm):
         len2[mod[i]] = length[mod[i]]
-    score2 = _corr_score(flips, work[20][0], length, cptr, cidx, ccredit, inside)
-    if score2 < score1:
+    score2 = _corr_score(flips, work[20][0], slen, cptr, cidx, scred, inside)
+    if not score2 < score1:
+        for i in range(nf1):  # restore pass 1 as the reported correction
+            flips[i] = keep[i]
+        work[20][0] = nf1
+        work[18][0] = stat_keep[0]
+        return b, ok
+    if passes < 3:
         return b2, ok2
-    for i in range(nf1):  # restore pass 1 as the reported correction
+    # E4, pass 3: reweight from pass 2's correction and decode once more
+    nf2 = work[20][0]
+    for i in range(nf2):
+        keep[i] = flips[i]
+    stat_keep[0] = work[18][0]
+    nm = 0
+    for i in range(nf2):
+        e = keep[i]
+        for k in range(cptr[e], cptr[e + 1]):
+            f = cidx[k]
+            L = clen[k]
+            if L < len2[f]:
+                if len2[f] == length[f]:
+                    mod[nm] = f
+                    nm += 1
+                len2[f] = L
+    if nm == 0:
+        return b2, ok2
+    b3, ok3 = _uf_shot(lits, nlit, s, edge_u, edge_v, len2, inc_edge, b_inc, obs_bits, corr, smallest, work,
+                       skip, wforest)
+    for i in range(nm):
+        len2[mod[i]] = length[mod[i]]
+    score3 = _corr_score(flips, work[20][0], slen, cptr, cidx, scred, inside)
+    if score3 < score2:
+        return b3, ok3
+    for i in range(nf2):  # restore pass 2
         flips[i] = keep[i]
-    work[20][0] = nf1
+    work[20][0] = nf2
     work[18][0] = stat_keep[0]
-    return b, ok
+    return b2, ok2
 
 
 @njit(parallel=True, cache=True)
 def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits,
                          out_ok, smallest, out_size, cptr, cidx, clen, ccredit, skip, tkeys, tvals,
-                         out_table):
+                         out_table, wforest, slen, scred, passes):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -728,7 +855,7 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
                 continue
             b, ok = _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
                                         none, smallest, work, cptr, cidx, clen, ccredit, len2, mod,
-                                        inside, keep, stat_keep, skip)
+                                        inside, keep, stat_keep, skip, wforest, slen, scred, passes)
             out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = work[18][0]
@@ -798,8 +925,13 @@ class UnionFind3D:
     def __init__(self, graph: DetectorGraph3D, config: UnionFind3DConfig | None = None):
         self.graph = graph
         self.config = config or UnionFind3DConfig()
-        self.tables = replace(build_uf_tables(graph, self.config.scale, self.config.growth),
-                              skip=self.config.skip_ahead)
+        c = self.config
+        t = replace(build_uf_tables(graph, c.scale, c.growth), skip=c.skip_ahead, wforest=c.weighted_forest,
+                    passes=c.passes)
+        if c.float_score:
+            sl, sc = float_score_tables(graph, t)
+            t = replace(t, score_len=sl, score_credit=sc)
+        self.tables = t
 
     def run(self, detection_events: np.ndarray, record_correction: bool = False,
             backend: str | None = None) -> UFResult:
@@ -822,10 +954,11 @@ class UnionFind3D:
             _uf_correlated_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                                  g.edge_obs_bits, corr, bits, ok, t.smallest, size,
                                  t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit, t.skip, tkeys, tvals,
-                                 table)
+                                 table, t.wforest, t.score_len, t.score_credit, t.passes)
         elif backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
-                      g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip, tkeys, tvals, table)
+                      g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip, tkeys, tvals, table,
+                      t.wforest)
         else:
             shot_fn = uf_correlated_shot_reference if correlated else uf_decode_shot_reference
             for s in range(S):
