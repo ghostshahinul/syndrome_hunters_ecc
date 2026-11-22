@@ -5,7 +5,7 @@ import pytest
 
 from src.circuits import NOISE_TIERS, tier_circuit
 from src.decoders.cube3d.graph import detector_graph
-from src.decoders.cube3d.union_find import UnionFind3D
+from src.decoders.cube3d.union_find import UnionFind3D, UnionFind3DConfig
 
 TIER_P = {"code_capacity": 0.05, "phenomenological": 0.01, "circuit": 0.005}
 CASES = [(tier, d) for tier in NOISE_TIERS for d in (3, 5, 7)]
@@ -87,6 +87,42 @@ def test_numba_bit_identical_to_reference(tier, d):
 
 def test_lengths_are_small_integers():
     for d in (3, 5, 7):
-        uf = engine("circuit", d)[1]
+        uf = UnionFind3D(detector_graph("circuit", d, 0.005), UnionFind3DConfig(scale=2))
         L = uf.tables.length
         assert L.min() == 2 and L.max() <= 8
+
+
+@pytest.mark.parametrize("scale", [2, 4, 8])
+def test_scale_sets_minimum_length(scale):
+    uf = UnionFind3D(detector_graph("circuit", 5, 0.005), UnionFind3DConfig(scale=scale))
+    assert uf.tables.length.min() == scale and uf.tables.length.max() <= 4 * scale
+
+
+VARIANTS = [(S, gr) for gr in ("all", "smallest") for S in (2, 4, 8)]
+
+
+@pytest.mark.parametrize("scale,growth", VARIANTS)
+@pytest.mark.parametrize("tier", NOISE_TIERS)
+def test_variants_bit_identical_and_consistent(tier, scale, growth):
+    """Every (scale, growth) variant: numba == reference, and the correction reproduces
+    the syndrome; single DEM components decode exactly."""
+    d = 5
+    g = detector_graph(tier, d, TIER_P[tier])
+    uf = UnionFind3D(g, UnionFind3DConfig(scale=scale, growth=growth))
+    dets, _ = sample(tier, d, 200, seed=7)
+    ref = uf.run(dets, record_correction=True, backend="reference")
+    fast = uf.run(dets, record_correction=True, backend="numba")
+    np.testing.assert_array_equal(fast.predictions, ref.predictions)
+    np.testing.assert_array_equal(fast.correction, ref.correction)
+    assert fast.ok.all()
+    np.testing.assert_array_equal(g.syndrome(fast.correction), dets)
+    edges = np.arange(g.n_edges)
+    single = uf.run(dets_for_edges(g, edges))
+    np.testing.assert_array_equal(single.predictions, g.edge_obs[edges])
+
+
+def test_config_validation():
+    with pytest.raises(ValueError):
+        UnionFind3DConfig(growth="largest")
+    with pytest.raises(ValueError):
+        UnionFind3DConfig(scale=0)

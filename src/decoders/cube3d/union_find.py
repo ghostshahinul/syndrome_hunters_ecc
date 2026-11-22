@@ -2,7 +2,12 @@
 
 Algorithm, per shot:
   1. Every lit detector starts as an odd cluster. Edge lengths are small integers,
-     L_e = max(1, round(2 * w_e / w_min)), so the lightest edge takes 2 half-edge steps.
+     L_e = max(1, round(S * w_e / w_min)), so the lightest edge takes S half-edge steps.
+     Default S = 4 (Milestone 1: S=2 -> 4 cut LER at d=9 from 1.142% to 0.876% for a
+     1.19x single-thread slowdown; S=8 was within the CI of S=4 at 1.55x).
+     Optional growth="smallest" grows only the minimum-size active clusters per round
+     (Delfosse-Nickerson); it was within the CI of growth="all" at every d, so "all"
+     stays the default.
   2. Growth rounds: every ACTIVE cluster (odd parity and not touching the boundary)
      adds 1 to the support of each not-yet-grown edge incident to its nodes (an edge
      between two active clusters gains 2 per round). All increments of a round are
@@ -38,28 +43,39 @@ from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
 
 UF_BACKENDS = ("reference", "numba")
+UF_GROWTH = ("all", "smallest")
 
 
 @dataclass(frozen=True)
 class UnionFind3DConfig:
+    """backend: reference | numba.  scale: S in L_e = max(1, round(S * w_e / w_min)).
+    growth: "all" grows every active cluster each round; "smallest" grows only the active
+    clusters of minimum node count (Delfosse-Nickerson rule; ties all grow)."""
     backend: str = "numba"
+    scale: int = 4
+    growth: str = "all"
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
             raise ValueError(f"backend must be one of {UF_BACKENDS}, got {self.backend!r}")
+        if self.growth not in UF_GROWTH:
+            raise ValueError(f"growth must be one of {UF_GROWTH}, got {self.growth!r}")
+        if self.scale < 1:
+            raise ValueError(f"scale must be >= 1, got {self.scale}")
 
 
 @dataclass(frozen=True, eq=False)
 class UFTables:
     length: np.ndarray   # (E,) int32 integer edge lengths
     b_inc: np.ndarray    # (B,) int32 boundary edges, ascending id
+    smallest: bool = False  # growth rule: only minimum-size active clusters grow
 
 
-def build_uf_tables(g: DetectorGraph3D) -> UFTables:
+def build_uf_tables(g: DetectorGraph3D, scale: int = 4, growth: str = "all") -> UFTables:
     w = g.edge_weight
-    length = np.maximum(1, np.rint(2.0 * w / w.min())).astype(np.int32)
+    length = np.maximum(1, np.rint(float(scale) * w / w.min())).astype(np.int32)
     b_inc = np.flatnonzero(g.edge_v == g.boundary).astype(np.int32)
-    return UFTables(length, b_inc)
+    return UFTables(length, b_inc, growth == "smallest")
 
 
 # ---- reference (idiomatic Python) -------------------------------------------------------
@@ -72,9 +88,10 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
     rank: dict[int, int] = {}
     parity: dict[int, int] = {}
     touches: dict[int, bool] = {}
+    size: dict[int, int] = {}
 
     def add_node(v: int, odd: int) -> None:
-        parent[v], rank[v], parity[v], touches[v] = v, 0, odd, False
+        parent[v], rank[v], parity[v], touches[v], size[v] = v, 0, odd, False, 1
 
     def find(x: int) -> int:
         root = x
@@ -95,6 +112,7 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
             rank[ra] += 1
         parity[ra] ^= parity[rb]
         touches[ra] = touches[ra] or touches[rb]
+        size[ra] += size[rb]
 
     visited: list[int] = []
     for v in lit:
@@ -111,6 +129,9 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
         active = {find(v) for v in visited if parity[find(v)] == 1 and not touches[find(v)]}
         if not active:
             break
+        if t.smallest:
+            m = min(size[r] for r in active)
+            active = {r for r in active if size[r] == m}
         newly: list[int] = []
         grew = False
         for u in visited:
@@ -198,7 +219,7 @@ def _find(parent, x):
 
 
 @njit(cache=True)
-def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr):
+def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest):
     n = row.shape[0]
     B = n
     E = edge_u.shape[0]
@@ -207,6 +228,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr):
     rank = np.zeros(n + 1, np.int32)
     parity = np.zeros(n + 1, np.uint8)
     touches = np.zeros(n + 1, np.bool_)
+    size = np.ones(n + 1, np.int32)
     in_cluster = np.zeros(n + 1, np.bool_)
     visited = np.empty(n, np.int32)
     nvis = 0
@@ -232,6 +254,16 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr):
             any_active = any_active or act
         if not any_active:
             break
+        if smallest:
+            m = n + 1
+            for i in range(nvis):
+                if active[visited[i]]:
+                    sz = size[_find(parent, visited[i])]
+                    if sz < m:
+                        m = sz
+            for i in range(nvis):
+                if active[visited[i]] and size[_find(parent, visited[i])] != m:
+                    active[visited[i]] = False
         nnew = 0
         growable = False
         for i in range(nvis):
@@ -278,6 +310,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr):
                     rank[ra] += 1
                 parity[ra] ^= parity[rb]
                 touches[ra] = touches[ra] or touches[rb]
+                size[ra] += size[rb]
 
     # Peeling forest: BFS from boundary, then from cluster nodes in ascending id.
     marked = np.zeros(n + 1, np.bool_)
@@ -356,9 +389,11 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr):
 
 
 @njit(parallel=True, cache=True)
-def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok):
+def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
+              smallest):
     for s in prange(dets.shape[0]):
-        b, ok = _uf_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr)
+        b, ok = _uf_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
+                         smallest)
         out_bits[s] = b
         out_ok[s] = ok
 
@@ -380,7 +415,7 @@ class UnionFind3D:
     def __init__(self, graph: DetectorGraph3D, config: UnionFind3DConfig | None = None):
         self.graph = graph
         self.config = config or UnionFind3DConfig()
-        self.tables = build_uf_tables(graph)
+        self.tables = build_uf_tables(graph, self.config.scale, self.config.growth)
 
     def run(self, detection_events: np.ndarray, record_correction: bool = False,
             backend: str | None = None) -> UFResult:
@@ -395,7 +430,7 @@ class UnionFind3D:
         ok = np.ones(S, dtype=bool)
         if backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
-                      g.edge_obs_bits, corr, bits, ok)
+                      g.edge_obs_bits, corr, bits, ok, t.smallest)
         else:
             for s in range(S):
                 b, flipped, good = uf_decode_shot_reference(g, t, dets[s])
