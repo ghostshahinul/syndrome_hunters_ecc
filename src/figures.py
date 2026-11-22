@@ -298,6 +298,8 @@ def plot_sweep(rows: list[dict], meta: dict | None = None):
     top = _legend(fig, [Line2D([], [], color=style_for(n).color, marker=style_for(n).marker, ms=8, lw=2,
                                label=n, mec=SURFACE) for n in decoders])
     note = f" {omitted} points with zero failures are not drawn." if omitted else ""
+    if {"UnionFind3D", "Hierarchical"} <= set(decoders):
+        note += " Where Hierarchical and UnionFind3D fail on exactly the same shots, the Hierarchical line hides UnionFind3D's."
     _footer(fig, ["Lower is better; a steeper fall with d means more protection from a larger code. "
                   "Whiskers show 95% Wilson intervals." + note, machine_line(meta)])
     fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.12)
@@ -317,6 +319,7 @@ def plot_thread_scaling(rows: list[dict], meta: dict | None = None):
     for ax, d in zip(axes, distances):
         _axes_style(ax)
         ymax = 0.0
+        notes = []
         for n in decoders:
             pts = sorted((r for r in rows if r["d"] == d and r["decoder"] == n), key=lambda r: r["threads"])
             if not pts:
@@ -326,9 +329,7 @@ def plot_thread_scaling(rows: list[dict], meta: dict | None = None):
             ys = [r["us_per_shot"] for r in pts]
             ymax = max(ymax, *ys)
             ax.plot(xs, ys, "-" + st.marker, color=st.color, lw=2, ms=8, mec=SURFACE, mew=1.2, zorder=3)
-            ax.annotate(f"{n}: {ys[0] / ys[-1]:.1f}× faster at {xs[-1]} threads", (xs[-1], ys[-1]),
-                        textcoords="offset points", ha="right",
-                        xytext=(-4, 26 if n == decoders[0] else 12), fontsize=10.5, color=INK_2)
+            notes.append(f"{n}: {ys[0] / ys[-1]:.1f}× faster at {xs[-1]} threads")
         pm = [r for r in rows if r["d"] == d and r["decoder"] == "PyMatching"]
         if pm:
             y = pm[0]["us_per_shot"]
@@ -336,6 +337,9 @@ def plot_thread_scaling(rows: list[dict], meta: dict | None = None):
             ax.axhline(y, color=style_for("PyMatching").color, lw=1.5, ls="--", zorder=2)
             ax.annotate("PyMatching, 1 thread", (1, y), textcoords="offset points", xytext=(4, 4),
                         color=INK_2, fontsize=10.5)
+        if notes:
+            ax.text(0.97, 0.72, "\n".join(notes), transform=ax.transAxes, ha="right", va="top",
+                    fontsize=10.5, color=INK_2, linespacing=1.6)
         threads = sorted({r["threads"] for r in rows if r["decoder"] != "PyMatching"})
         ax.set_xscale("log", base=2)
         ax.set_xticks(threads)
@@ -371,8 +375,6 @@ def plot_fast_path_fraction(rows: list[dict], meta: dict | None = None):
         c = DISTANCE_COLORS.get(d, INK_2)
         ax.plot(xs, ys, "-" + DISTANCE_MARKERS.get(d, "o"), color=c, lw=2, ms=8, mec=SURFACE, mew=1.2,
                 label=f"d = {d}", zorder=3)
-        ax.annotate(f"d = {d}", (xs[-1], ys[-1]), textcoords="offset points", xytext=(8, -4),
-                    fontsize=11, color=INK_2)
     ax.set_xscale("log")
     _log_axis_plain(ax.xaxis, sorted({100 * r["p"] for r in rows}))
     ax.set_ylim(0, 105)
@@ -385,10 +387,10 @@ def plot_fast_path_fraction(rows: list[dict], meta: dict | None = None):
     fig.text(0.08, 0.915, "\n".join(textwrap.wrap(
              _subtitle(meta, first.get("shots")) + f"  ·  whole-shot gate, K = {K}", 140)),
              fontsize=11, color=INK_2, va="top")
-    ax.legend(frameon=False, fontsize=11, loc="lower left")
+    ax.legend(frameon=False, fontsize=11, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     _footer(fig, ["Includes shots with no detection events. The rest go to UnionFind3D.",
                   machine_line(meta)])
-    fig.subplots_adjust(left=0.1, right=0.9, top=0.84, bottom=0.2)
+    fig.subplots_adjust(left=0.1, right=0.87, top=0.84, bottom=0.2)
     return fig
 
 
@@ -445,8 +447,11 @@ FIGURES: dict[str, Callable] = {
 
 def meta_from_rows(rows: list[dict]) -> dict:
     r = rows[0]
-    return {k: r.get(k) for k in ("cpu", "power", "logical_cpus", "backend", "git_commit", "basis",
+    meta = {k: r.get(k) for k in ("cpu", "power", "logical_cpus", "git_commit", "basis",
                                   "rounds_rule", "noise", "run")}
+    backends = {x.get("backend") for x in rows}
+    meta["backend"] = "numba" if "numba" in backends else r.get("backend")
+    return meta
 
 
 def main() -> None:

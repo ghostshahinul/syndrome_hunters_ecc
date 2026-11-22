@@ -174,3 +174,69 @@ both gates' semantics, K=0 equals UF, every single DEM component, consistent cou
 Full suite: 425 passed, 24 skipped, 1 xfailed.
 
 **Next:** Milestone 3, figures.
+
+Milestone 2 commit: `aac5710`. You also committed the work in progress as `ec9ad56` "For
+discord" at 20:15; I left that commit as it is.
+
+---
+
+## Milestone 3: figures (20:21 to 20:31, time-box 1.5 h)
+
+**What was built**
+- `src/figures.py`:
+  - **Style registry:** `STYLES` gives every decoder a fixed colour and marker in all figures.
+    The first 4 slots keep the existing operating-point styles. UnionFind3D, Hierarchical,
+    Hierarchical (partial) and Cube3D-Local take the remaining slots of the reference palette.
+    The operating-point figure from pytest now uses the same registry.
+  - **Plot functions:** `plot_accuracy_runtime` (filled marker = 1 thread, hollow = 12 threads;
+    footer adds CPU, power, threads, backend and commit), `plot_sweep`, `plot_thread_scaling`,
+    `plot_fast_path_fraction` and `plot_cube_collapse_story`.
+  - **Saving:** `save_figure` writes `<name>_<timestamp>.png` (opened exclusively, never
+    overwritten) plus `<name>_latest.png`.
+  - **CLI:** `python -m src.figures --accuracy … --sweep … --threads …` regenerates the figures
+    from saved CSVs.
+- `src/benchmark.py` (`python -m src.benchmark`, `make benchmark`) measures the operating point,
+  the sweep and thread scaling. It writes the CSVs with the machine fingerprint, then draws
+  every figure. `--quick --out <dir>` is for smoke runs.
+- `tests/test_figures.py` runs every plot function on a tiny synthetic CSV and checks that saving
+  never overwrites and that the style registry is unique (9 tests).
+- I couldn't run the palette validator because Node is not installed. The palette is the
+  skill's reference palette, unchanged.
+
+**Benchmark run 1** (commit `5e7b5ff`, i5-13420H, AC / Balanced, Windows reports 2100 MHz)
+- CSVs: `results/accuracy_runtime_20261121_202412.csv` (50k shots),
+  `results/sweep_20261121_202412.csv` (100k shots, p = 0.1/0.2/0.3/0.5/0.8%, single thread)
+  and `results/thread_scaling_20261121_202412.csv` (100k shots).
+- Figures (`results/plots/*_latest.png`, final versions stamped 202806/202830):
+  `accuracy_runtime`, `accuracy_runtime_sweep`, `thread_scaling`, `fast_path_fraction` and
+  `cube_collapse_story`. The earlier stamps (202412, 202806) are first renders that had layout
+  problems. I kept them because the rule is never to overwrite.
+
+**Key numbers (p = 0.5%, 50k shots)**
+- **UF3D:** LER 1.710 / 1.498 / 1.166 / 0.876% at d = 3/5/7/9. Single-thread µs:
+  0.43 / 2.30 / 6.92 / 16.50; 12 threads: 0.11 / 0.51 / 0.99 / 2.23.
+- **Hierarchical:** LER 1.850 / 1.498 / 1.166 / 0.876%. Single-thread µs: 0.34 / 2.37 / 6.98 / 16.60.
+- **PyMatching:** LER 1.704 / 1.384 / 1.010 / 0.690%; µs 0.35 / 2.33 / 7.97 / 20.21.
+- **Flattening story:** PyMatching 2D on flat 2.68 → 5.56 → 11.73 → 20.80%; Cube-Collapse
+  2.68 → 9.44 → 18.18 → 30.96%.
+- **Thread scaling, 1 → 12 threads:** UF 6.7× (d=7) and 7.0× (d=9); Hierarchical 7.1× and 6.9×.
+- **New finding:** p = 0.8% is above threshold for every decoder, PyMatching included
+  (4.06 → 4.89 → 5.24 → 5.31% for d = 3 → 9).
+
+## Milestone 4: README + talk (20:21 to 20:32, time-box 1.5 h, written while the benchmark ran)
+- **`README.md`, rewritten:**
+  1. quickstart
+  2. the algorithms (how each works, complexity, parallelism, deviations from Clique_L2
+     2507.11481, Delfosse–Nickerson and 2307.14989)
+  3. the evaluation story with the figures
+  4. bugs found and fixed
+  5. results tables with CIs, the acceptance targets and honest limitations
+  6. test-suite overview
+- **`docs/talk_outline.md`:** 8 slides plus a whiteboard segment (5-qubit repetition code,
+  union-find growth and peeling, why the graph is 3D). Each slide names its figure and has 2 to
+  4 speaker bullets.
+- **Makefile:** `make benchmark` and `make benchmark-quick` (the latter writes to
+  `scratch_results/`, which is gitignored).
+- **Check before the talk:** I describe arXiv 2307.14989 only as the source of the
+  predecoder + global-decoder layout. I didn't re-read the paper tonight, so please check that
+  wording.
