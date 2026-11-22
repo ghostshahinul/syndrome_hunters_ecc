@@ -48,6 +48,7 @@ pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib,
 | Regenerate figures from saved CSVs | `python -m src.figures --accuracy results/accuracy_runtime_<ts>.csv --sweep results/sweep_<ts>.csv --threads results/thread_scaling_<ts>.csv` |
 | Milestone experiments | `python -m scripts.m1_uf_experiments`, `python -m scripts.m2_hierarchical`, `python -m scripts.m5_mwpm` |
 | Operating point (5 decoders, d = 3–9, 5 batches × 50k shots, numba on 1 thread) | `python -m src.operating_point` |
+| Error-rate sweep, p = 0.2–0.7% (same decoders, 10 batches × 50k shots); draws our style, a journal-style per-round figure, and an operating-point run at p = 0.5% | `python -m src.error_rate_sweep` |
 
 Each benchmark writes CSVs to `results/` and figures to `results/plots/` as
 `<name>_<timestamp>.png` plus `<name>_latest.png`. Nothing is ever overwritten. Every CSV
@@ -300,6 +301,29 @@ mode, numba cache cleared and warmed up); time is the mean batch µs/shot. Sourc
   shots are answered by table lookup.
 - **Multi-core** (reported separately, not a race): see `thread_scaling_latest.png`. PyMatching
   can be parallelized across processes the same way.
+
+### Error-rate sweep run 1: p = 0.2–0.7%, plugged in (operating-point run 44 is its p = 0.5% slice)
+Same five decoders, d = 3–9, rounds = d, 10 batches × 50,000 = 500,000 shots per point, every
+decoder single-thread, AC power + "Best performance". Source:
+`results/error_rate_sweep/sweep_run1.csv`. Figures: `sweep_run1_ours.png` (our style, LER per
+shot) and `sweep_run1_paper.png` (journal style, LER per round ε = [1 − (1 − 2P_L)^(1/d)]/2).
+
+Hierarchical vs plain PyMatching, logical failures per shot, % [95% CI]:
+
+| p | d = 5 | d = 7 | d = 9 |
+|---|---|---|---|
+| 0.2% | 0.086 [0.078, 0.094] vs 0.101 [0.093, 0.110] | 0.023 [0.019, 0.028] vs 0.031 [0.026, 0.036] | 0.005 [0.003, 0.007] vs 0.007 [0.005, 0.010] |
+| 0.3% | 0.278 [0.264, 0.293] vs 0.330 [0.314, 0.346] | 0.110 [0.102, 0.120] vs 0.137 [0.127, 0.148] | 0.036 [0.031, 0.042] vs 0.053 [0.047, 0.060] |
+| 0.5% | 1.235 [1.205, 1.266] vs 1.401 [1.369, 1.434] | 0.839 [0.814, 0.865] vs 0.995 [0.967, 1.022] | 0.518 [0.498, 0.538] vs 0.671 [0.649, 0.694] |
+| 0.7% | 3.149 [3.101, 3.198] vs 3.451 [3.401, 3.502] | 2.957 [2.910, 3.004] vs 3.331 [3.281, 3.381] | 2.708 [2.663, 2.753] vs 3.124 [3.076, 3.172] |
+
+- Hierarchical has the lower LER at every p for d = 5/7/9. The CIs are separate for p ≥ 0.3%
+  and overlap at p = 0.2%, where there are only 25–429 failures per point.
+- Correlated PyMatching stays the most accurate for d ≥ 5 at every p.
+- At d = 3, p ≤ 0.3%, correlated PyMatching is *worse* than plain PyMatching (0.344% vs 0.304% at 0.2%),
+  and Hierarchical's fast path costs a little (0.333% vs UF3D correlated 0.302%).
+- Time at p = 0.5% (run 44): Hierarchical ÷ PyMatching = 1.99× (d=5), 1.58× (d=7), 1.54× (d=9),
+  matching run 40.
 
 ### Earlier: benchmark run 1, before correlations (commit `5e7b5ff`)
 

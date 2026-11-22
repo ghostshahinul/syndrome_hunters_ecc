@@ -6,8 +6,8 @@ import pytest
 
 from src.decoders import DECODERS
 from src.figures import (DISPLAY_NAMES, STYLES, display_name, plot_accuracy_runtime,
-                         plot_cube_collapse_story, plot_ensemble_vs_m, plot_fast_path_fraction, plot_mwpm_tier, plot_sweep,
-                         plot_thread_scaling, read_rows, save_figure, style_for, write_rows)
+                         plot_cube_collapse_story, plot_ensemble_vs_m, plot_fast_path_fraction, plot_mwpm_tier, plot_paper_style, plot_sweep,
+                         per_round, plot_thread_scaling, read_rows, save_figure, style_for, write_rows)
 
 META = {"cpu": "13th Gen Intel(R) Core(TM) i5-13420H", "power": "AC / Balanced", "logical_cpus": "12",
         "backend": "numba", "git_commit": "abc1234", "run": 7}
@@ -145,3 +145,18 @@ def test_ensemble_vs_m(tmp_path):
                 r["M"] = M
                 rows.append(r)
     _check(plot_ensemble_vs_m(_csv(tmp_path, "ens", rows), META), "ensemble_vs_M", tmp_path)
+
+
+def test_paper_style_sweep(sweep_rows, tmp_path):
+    import matplotlib.pyplot as plt
+
+    from src.figures import PAPER_RC
+    with plt.rc_context(PAPER_RC):
+        _check(plot_paper_style(sweep_rows, META), "paper_style", tmp_path)
+
+
+def test_per_round_inverts_the_r_round_formula():
+    for eps, r in ((1e-4, 3), (3e-3, 9), (0.02, 5)):
+        p_shot = (1 - (1 - 2 * eps) ** r) / 2
+        assert abs(per_round(p_shot, r) - eps) < 1e-12
+    assert per_round(0.0, 7) == 0.0 and abs(per_round(0.01, 1) - 0.01) < 1e-15

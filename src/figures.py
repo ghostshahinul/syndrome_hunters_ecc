@@ -135,7 +135,8 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def save_figure(fig, name: str, directory: Path = PLOTS_DIR, stamp: str | None = None) -> tuple[Path, Path]:
+def save_figure(fig, name: str, directory: Path = PLOTS_DIR, stamp: str | None = None,
+                facecolor: str = SURFACE) -> tuple[Path, Path]:
     """Write <name>_<stamp>.png (exclusive; a suffix is added on collision) and copy it to
     <name>_latest.png. Returns (timestamped path, latest path)."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -144,7 +145,7 @@ def save_figure(fig, name: str, directory: Path = PLOTS_DIR, stamp: str | None =
     while path.exists():
         k += 1
         path = directory / f"{name}_{stamp}_{k}.png"
-    fig.savefig(path, dpi=150, facecolor=SURFACE)
+    fig.savefig(path, dpi=150, facecolor=facecolor)
     plt.close(fig)
     latest = directory / f"{name}_latest.png"
     shutil.copyfile(path, latest)
@@ -324,6 +325,100 @@ def plot_sweep(rows: list[dict], meta: dict | None = None):
     _footer(fig, ["Lower is better; a steeper fall with d means more protection from a larger code. "
                   "Whiskers show 95% Wilson intervals." + note, machine_line(meta)])
     fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.12)
+    return fig
+
+
+# ---- LER per round vs p, journal style ------------------------------------------------------
+# A second look at the sweep in the layout common in QEC papers: serif type, white background,
+# one colour per panel (code distance), decoders told apart by line style + marker.
+PAPER_PANEL_COLORS = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+PAPER_STYLES = {  # decoder -> (linestyle, marker, filled, marker size)
+    "PyMatching":            ("-.", "s", False, 6),
+    "Correlated PyMatching": ((0, (3, 1, 1, 1, 1, 1)), "o", True, 6),
+    "UnionFind3D":           (":", "D", False, 5),
+    "UF3D correlated":       ("--", "v", False, 7),
+    "Hierarchical":          ("-", "*", False, 10),
+    "Hierarchical (partial)": ("-", "X", False, 7),
+    "Cube-Collapse":         ((0, (1, 1)), "o", False, 6),
+    "PyMatching 2D on flat": ((0, (5, 2)), "^", False, 6),
+}
+PAPER_FALLBACK = ("-", "o", False, 6)
+PAPER_RC = {"font.family": "serif", "font.serif": ["Times New Roman", "Times", "STIXGeneral", "DejaVu Serif"],
+            "mathtext.fontset": "stix", "axes.linewidth": 0.8}
+
+
+def per_round(p_shot: float, rounds: int) -> float:
+    """Logical error rate per round from the per-shot rate after `rounds` rounds, assuming
+    independent rounds: P = (1 - (1 - 2e)^r) / 2  =>  e = (1 - (1 - 2P)^(1/r)) / 2."""
+    p_shot = min(max(float(p_shot), 0.0), 0.5)
+    return 0.5 * (1.0 - (1.0 - 2.0 * p_shot) ** (1.0 / rounds))
+
+
+def plot_paper_style(rows: list[dict], meta: dict | None = None):
+    """rows: decoder, d, p, rounds, shots, failures, ler, ci_low, ci_high (single-thread rows).
+    x = physical error rate p, y = logical error rate per round (log-log), one panel per d,
+    95% Wilson intervals converted to per round. Points with 0 failures are not drawn."""
+    meta = meta or {}
+    rows = [r for r in rows if (r.get("threads") or 1) == 1]
+    names = list(dict.fromkeys(r["decoder"] for r in rows))
+    decoders = [n for n in PAPER_STYLES if n in names] + [n for n in names if n not in PAPER_STYLES]
+    distances = sorted({r["d"] for r in rows})
+    ps = sorted({r["p"] for r in rows})
+    with plt.rc_context(PAPER_RC):  # save inside plt.rc_context(PAPER_RC) too (tick labels draw late)
+        n = len(distances)
+        fig, axes = plt.subplots(1, n, figsize=(4.3 * n, 6.2), sharey=True, facecolor="white", squeeze=False)
+        axes = axes[0]
+        omitted = 0
+        for i, (ax, d) in enumerate(zip(axes, distances)):
+            color = PAPER_PANEL_COLORS[i % len(PAPER_PANEL_COLORS)]
+            ax.set_facecolor("white")
+            for name in decoders:
+                pts = sorted((r for r in rows if r["d"] == d and r["decoder"] == name), key=lambda r: r["p"])
+                omitted += sum(1 for r in pts if r["failures"] == 0)
+                pts = [r for r in pts if r["failures"] > 0]
+                if not pts:
+                    continue
+                ls, marker, filled, ms = PAPER_STYLES.get(name, PAPER_FALLBACK)
+                x = [r["p"] for r in pts]
+                y = [per_round(r["ler"], r["rounds"] or d) for r in pts]
+                lo = [yy - per_round(r["ci_low"], r["rounds"] or d) for yy, r in zip(y, pts)]
+                hi = [per_round(r["ci_high"], r["rounds"] or d) - yy for yy, r in zip(y, pts)]
+                ax.errorbar(x, y, yerr=[lo, hi], color=color, ls=ls, lw=1.4, marker=marker, ms=ms,
+                            mfc=color if filled else "white", mec=color, mew=1.2,
+                            elinewidth=1.0, capsize=3, capthick=1.0, label=name, zorder=3)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xticks(ps)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}"))
+            ax.xaxis.set_minor_formatter(NullFormatter())
+            ax.set_xlim(ps[0] * 0.9, ps[-1] * 1.08)
+            ax.grid(True, which="major", ls=":", lw=0.7, color="0.65", zorder=0)
+            ax.tick_params(labelsize=11, direction="out", which="both")
+            ax.set_xlabel("Physical error rate $p$", fontsize=13)
+            ax.legend(loc="lower right", fontsize=10.5, framealpha=0.95, edgecolor="0.6", fancybox=False,
+                      handlelength=2.8, borderaxespad=0.4, labelspacing=0.3)
+        axes[0].set_ylabel("Logical error rate per round", fontsize=13)
+        shots = sorted({r["shots"] for r in rows})
+        shots_txt = f"{shots[0]:,}" if len(shots) == 1 else f"{shots[0]:,}–{shots[-1]:,}"
+        caption = (f"Logical error rate per round versus physical error rate $p$ for the rotated surface code "
+                   f"(Z memory, rounds = $d$, circuit-level noise; {shots_txt} shots per point, the same shots "
+                   f"for every decoder). Error bars show 95% Wilson score confidence intervals, converted to "
+                   f"per round with $\\epsilon = [1 - (1 - 2P_L)^{{1/d}}]/2$. The comparison includes PyMatching "
+                   f"and correlated PyMatching (references), UnionFind3D, UF3D correlated, and Hierarchical "
+                   f"(whose deep tier is UF3D correlated, so the two curves largely coincide).")
+        if omitted:
+            caption += f" {omitted} point{'s' * (omitted != 1)} with zero failures {'are' if omitted != 1 else 'is'} not drawn."
+        caption += "  " + machine_line(meta)
+        wrapped = textwrap.wrap(caption, int(fig.get_figwidth() * 10.5))
+        H = fig.get_figheight()
+        cap_in = 0.15 + 0.24 * len(wrapped)               # caption block height (inches)
+        fig.text(0.05, 0.15 / H, "\n".join(wrapped), fontsize=12, va="bottom", ha="left", linespacing=1.35)
+        bottom = (cap_in + 1.1) / H                        # + tick labels, x label, panel label
+        fig.subplots_adjust(left=0.065, right=0.99, top=0.97, bottom=bottom, wspace=0.08)
+        for i, (ax, d) in enumerate(zip(axes, distances)):
+            pos = ax.get_position()
+            fig.text((pos.x0 + pos.x1) / 2, (cap_in + 0.12) / H, f"({chr(97 + i)}) $d = {d}$",
+                     ha="center", va="bottom", fontsize=13)
     return fig
 
 
