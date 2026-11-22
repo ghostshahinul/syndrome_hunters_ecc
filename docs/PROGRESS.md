@@ -292,3 +292,97 @@ already in the venv.
   | 7 | 1.014; 8.50 (8.33–8.76) | 0.610; 23.74 | 11.758; 4.71 | 1.212; 7.46 (7.38–7.55) | 1.212; 7.52 (7.42–7.69) |
   | 9 | 0.663; 20.29 (20.23–20.39) | 0.276; 59.54 | 21.013; 11.10 | 0.842; 17.44 (17.33–17.55) | 0.842; 17.80 (17.54–18.01) |
 - Full suite: 439 passed, 24 skipped, 1 xfailed in 48.5 s (the d=9 operating point adds about 25 s).
+
+Operating-point commit: `a1d2bfa` (not pushed).
+
+---
+
+## Milestone 5 (B): our own MWPM as a third tier (20:41 to 21:03, time-box 2 h)
+No answer to the [ASK] within 10 minutes, so I took B, as the plan says.
+
+**What was built**
+- `src/decoders/cube3d/mwpm.py`, **MWPM3D** (`mwpm_3d`):
+  - scipy Dijkstra from each lit detector, plus a networkx exact blossom with one boundary copy
+    per detector;
+  - observable parity along the shortest paths;
+  - sparse but exact pruning: a pair edge is kept only if it is shorter than both detectors'
+    boundary distances, and boundary copies pair along kept edges. This made it 2.2–2.7× faster.
+- `src/decoders/cube3d/three_tier.py`, **Hierarchical + MWPM** (`hierarchical_mwpm`):
+  Hierarchical, then MWPM3D for shots whose largest UF cluster has more than T nodes
+  (default T = 2·rounds).
+- **UF and the fused Hierarchical kernel now report the largest cluster's node count.** numba
+  equals the reference (tested); predictions are unchanged.
+- **`Decoder.slow` (base class):** the generic speed and baseline tests use 500 / 5,000 shots for
+  the pure-Python decoders. Without it the suite took 7.5 min; with it, 61 s.
+- **Pinned** `networkx==3.7` and `scipy==1.18.1`. Both were already installed as PyMatching
+  dependencies, so nothing new was installed.
+- **Tests:** `tests/test_cube3d_mwpm.py` (18 tests). Figure: `plot_mwpm_tier` (`--mwpm` in
+  `src.figures`) plus a smoke test.
+
+**Results** (`results/mwpm/mwpm_tier_20261121_205911.csv`; figures `results/plots/mwpm_tier_p0_{1,2,5}_latest.png`)
+- **MWPM3D agrees with PyMatching** on 16,771 of 16,772 decoded shots across all (p, d). The one
+  difference is at d=5, p=0.5%, almost certainly a tie.
+- **MWPM3D cost per routed shot, pure Python:** about 0.3–0.6 ms at d=3, 0.6–1.3 ms at d=5,
+  1.4–7.6 ms at d=7 and 3.5–42 ms at d=9.
+- **p = 0.5%, 10k shots, failures:**
+
+  | d | PyMatching | UF | 3-tier (T, routed) | µs/shot: UF → 3-tier |
+  |---|---|---|---|---|
+  | 5 | 165 | 180 | 171 (T=5, 18.9%) | 2.26 → 228 |
+  | 7 | 75 | 101 | 84 (T=14, 17.4%); 76 (T=7, 44%) | 6.78 → 1,155; 3,220 |
+  | 9 | 72 | 90 | 78 (T=27, 15.6%) | 19.9 → 5,681 (T=9 and T=18 skipped: over the 90 s budget) |
+
+- **p ≤ 0.2%, 20k shots:** failure counts are 0–66, too few to show a significant gain. For
+  example d=9 p=0.2%: UF 2, 3-tier 0 (T ≤ 27), PyMatching 0.
+- **A 100k-shot analysis** (scratch script, PyMatching answers standing in for MWPM3D since the two
+  agree) shows cluster size is a strong trigger at p=0.2%: routing the ~9% of shots with the
+  largest clusters fixes all 13 of 13 fixable UF failures at d=7 and 6 of 6 at d=9. It is a weaker
+  trigger at p=0.5%: the top 10% catches about half of them.
+- **Verdict:** the third tier shows the accuracy headroom, closing about 2/3 of the UF-vs-MWPM gap at
+  d = 7/9. With a pure-Python blossom it costs 170–290× UF's time. It needs a compiled matcher
+  (or cluster-local matching) to be practical. It is **not** a default anywhere.
+
+---
+
+## FINAL SUMMARY (21:03)
+
+| Milestone | Status | Key numbers | Commit(s) |
+|---|---|---|---|
+| 1. UF experiments | done | S=2 → 4: d=9 LER 1.142 → 0.876% for 1.19× time; smallest-first growth within CI | `217235f` |
+| 2. Hierarchical | done | identical failures to UF at d ≥ 5; 1.2–3.0× faster single-thread on sparse shots; partial gate rejected (d=9: 1.066% vs 0.922%) | `aac5710` (plus your `ec9ad56`) |
+| 3. Figures | done | 5 standard figures + style registry + `python -m src.benchmark`; UF/Hierarchical scale 6.7–7.1× on 12 threads | `5e7b5ff`, `51d341e` |
+| 4. README + talk | done | README sections 1–6, `docs/talk_outline.md` (8 slides + whiteboard) | `51d341e` |
+| Push (your request) | done | merged `origin/main` (MWPM.txt only), pushed `34653ec` | `34653ec` |
+| Operating point (your request) | done | 5 decoders, d = 3–9, batches; d=9 UF/Hierarchical 0.842% vs PyMatching 0.663%, 17.4 vs 20.3 µs | `a1d2bfa` |
+| 5 (B). MWPM third tier | done | MWPM3D agrees with PyMatching on 16,771/16,772 shots; 3-tier closes about 2/3 of the gap at d = 7/9, p=0.5%, at 170–290× cost | `1d75a90` + final commit |
+
+**Final numbers (p = 0.5%, single thread; operating-point run 10, 150k shots):**
+- **d=7:** Hierarchical 1.212% at 7.52 µs vs PyMatching 1.014% at 8.50 µs (1.20×).
+- **d=9:** Hierarchical 0.842% at 17.80 µs vs PyMatching 0.663% at 20.29 µs (1.27×).
+
+**Acceptance targets:**
+- Hierarchical and UF LER fall with d: **met**.
+- Hierarchical within the CI of UF: **met**.
+- Hierarchical faster than UF: **partly met** (only where the fast path finishes most shots).
+- Stretch, ≤ 1.5× PyMatching at d=7: **met** (1.15–1.20×).
+
+**Figures** (`results/plots/*_latest.png`): `accuracy_runtime`, `accuracy_runtime_sweep`,
+`thread_scaling`, `fast_path_fraction`, `cube_collapse_story`, `mwpm_tier_p0_1`,
+`mwpm_tier_p0_2` and `mwpm_tier_p0_5`, plus `results/operating_point/operating_point_run10.png`.
+
+**For you to check or decide**
+1. **Push:** commits after `34653ec` (`a1d2bfa`, `1d75a90` and the final commit) are **not pushed**.
+2. **Teammate branches:** `shahi_2` (FaultJoin), `shahi_3` (FaultJoin + NVIDIA Ising hybrid) and
+   `aRAYofsunshine07-patch-1` are not merged into main. They edit shared files (`conftest.py`,
+   `test_vs_baseline.py`, `plots.py`, `evaluate.py`), so expect conflicts.
+3. **Operating point:** it now shows the 5 decoders you named. Cube-Collapse is available via
+   `--decoders` and is still in `src.benchmark` and the `cube_collapse_story` figure.
+4. **README wording:** the description of arXiv 2307.14989 (predecoder + global decoder) is from
+   memory; please check it.
+5. **Superseded figures:** `results/plots/` keeps first renders with layout problems (never
+   overwritten). The `_latest.png` files are the final ones; delete the old stamps if you want.
+6. **Palette validator:** it was not run (no Node). The palette is the skill's reference palette
+   unchanged; the two MWPM series use neutral inks with unique markers, because all 8 palette
+   slots are taken.
+7. **Timing caveat:** Windows always reports 2100 MHz, and absolute µs drift between sessions.
+   Compare only within one CSV.

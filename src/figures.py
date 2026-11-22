@@ -182,11 +182,11 @@ def _legend(fig, handles, y: float = 0.875) -> float:
                ncol=ncol, frameon=False, fontsize=12, handlelength=2.2, columnspacing=2.0)
     rows = -(-len(handles) // ncol)
     row_h = 0.27 / fig.get_figheight()  # ~0.27 inch per legend row at fontsize 12
-    return y - rows * row_h - 0.07
+    return y - rows * row_h - 0.09
 
 
 def _footer(fig, lines: list[str]) -> None:
-    width = int(fig.get_figwidth() * 13.5)
+    width = int(fig.get_figwidth() * 11.0)
     wrapped = [w for line in lines for w in textwrap.wrap(line, width)]
     fig.text(0.06, 0.015, "\n".join(wrapped), fontsize=10.5, color=INK_2, va="bottom", linespacing=1.5)
 
@@ -441,19 +441,77 @@ def plot_cube_collapse_story(rows: list[dict], meta: dict | None = None):
     return fig
 
 
+# ---- MWPM third tier: accuracy vs cost --------------------------------------------------
+def plot_mwpm_tier(rows: list[dict], meta: dict | None = None):
+    """rows from scripts/m5_mwpm.py at one p: decoder, d, ler, ci_low, ci_high, us_per_shot,
+    and for "Hierarchical + MWPM" the threshold and routed_fraction. One panel per d;
+    the three-tier points (one per threshold) are joined by a line, labelled with T."""
+    meta = meta or {}
+    distances = sorted({r["d"] for r in rows})
+    fig, axes = plt.subplots(1, len(distances), figsize=(_width(len(distances), 5.4), 6.0),
+                             sharey=False, facecolor=SURFACE, squeeze=False)
+    axes = axes[0]
+    order = ["PyMatching", "UnionFind3D", "Hierarchical", "Hierarchical + MWPM"]
+    for ax, d in zip(axes, distances):
+        _axes_style(ax)
+        for n in order:
+            pts = [r for r in rows if r["d"] == d and r["decoder"] == n]
+            if not pts:
+                continue
+            st = style_for(n)
+            pts.sort(key=lambda r: r["us_per_shot"])
+            xs = [r["us_per_shot"] for r in pts]
+            ys = [100 * r["ler"] for r in pts]
+            ax.errorbar(xs, ys, yerr=[[100 * (r["ler"] - r["ci_low"]) for r in pts],
+                                      [100 * (r["ci_high"] - r["ler"]) for r in pts]],
+                        fmt=("-" if len(pts) > 1 else "") + st.marker, color=st.color, ms=8, lw=1.5,
+                        mec=SURFACE, mew=1.2, elinewidth=1.5, capsize=3, zorder=3)
+            if n == "Hierarchical + MWPM":
+                labels: dict[tuple[float, float], tuple[list[str], float]] = {}
+                for r in pts:  # thresholds that route the same shots share one label
+                    key = (round(r["us_per_shot"], 2), round(100 * r["ci_high"], 4))
+                    ts, frac = labels.get(key, ([], float(r["routed_fraction"])))
+                    labels[key] = (ts + [str(int(float(r["threshold"])))], frac)
+                for (x, y_top), (ts, frac) in labels.items():
+                    share = f"{100 * frac:.0f}%" if frac >= 0.01 else f"{100 * frac:.1f}%"
+                    ax.annotate(f"T={','.join(ts)}\n{share}", (x, y_top), textcoords="offset points",
+                                xytext=(0, 4), ha="center", va="bottom", fontsize=9, color=INK_2,
+                                linespacing=1.1)
+        ax.set_xscale("log")
+        _log_axis_plain(ax.xaxis)
+        ymax = max(100 * r["ci_high"] for r in rows if r["d"] == d)
+        ax.set_ylim(0, ymax * 1.25)
+        ax.set_title(f"Distance {d}", fontsize=14, color=INK, pad=10)
+        ax.set_xlabel("Time per shot (µs, log scale)", fontsize=12, color=INK_2)
+    axes[0].set_ylabel("Logical failures (%)", fontsize=12, color=INK_2)
+    first = rows[0]
+    _header(fig, "A third tier: exact matching for UF's largest clusters",
+            _subtitle(meta, first.get("shots"), first.get("p")))
+    handles = [Line2D([], [], color=style_for(n).color, marker=style_for(n).marker, ms=8, lw=1.5,
+                      label=n, mec=SURFACE) for n in order]
+    top = _legend(fig, handles)
+    _footer(fig, ["Shots whose largest UnionFind3D cluster has more than T nodes are re-decoded by "
+                  "MWPM3D (our exact matching, pure Python); labels give T and the share of shots routed. "
+                  "Time = Hierarchical batch time + the routed shots' MWPM time, single thread. "
+                  "Whiskers show 95% Wilson intervals.", machine_line(meta)])
+    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.24, wspace=0.2)
+    return fig
+
+
 FIGURES: dict[str, Callable] = {
     "accuracy_runtime": plot_accuracy_runtime,
     "accuracy_runtime_sweep": plot_sweep,
     "thread_scaling": plot_thread_scaling,
     "fast_path_fraction": plot_fast_path_fraction,
     "cube_collapse_story": plot_cube_collapse_story,
+    "mwpm_tier": plot_mwpm_tier,
 }
 
 
 def meta_from_rows(rows: list[dict]) -> dict:
     r = rows[0]
     meta = {k: r.get(k) for k in ("cpu", "power", "logical_cpus", "git_commit", "basis",
-                                  "rounds_rule", "noise", "run")}
+                                  "rounds_rule", "noise", "run") if r.get(k) not in (None, "")}
     backends = {x.get("backend") for x in rows}
     meta["backend"] = "numba" if "numba" in backends else r.get("backend")
     return meta
@@ -464,6 +522,7 @@ def main() -> None:
     ap.add_argument("--accuracy", type=Path, help="accuracy_runtime_<ts>.csv")
     ap.add_argument("--sweep", type=Path, help="sweep_<ts>.csv")
     ap.add_argument("--threads", type=Path, help="thread_scaling_<ts>.csv")
+    ap.add_argument("--mwpm", type=Path, help="mwpm/mwpm_tier_<ts>.csv (one figure per p)")
     args = ap.parse_args()
     out = []
     if args.accuracy:
@@ -481,6 +540,12 @@ def main() -> None:
     if args.threads:
         rows = read_rows(args.threads)
         out.append(save_figure(plot_thread_scaling(rows, meta_from_rows(rows)), "thread_scaling"))
+    if args.mwpm:
+        rows = read_rows(args.mwpm)
+        meta = {**meta_from_rows(rows), "backend": "numba + Python (MWPM)", "threads_note": "1 thread"}
+        for p in sorted({r["p"] for r in rows}):
+            sub = [r for r in rows if r["p"] == p]
+            out.append(save_figure(plot_mwpm_tier(sub, meta), f"mwpm_tier_p{100 * p:g}".replace(".", "_")))
     for stamped, latest in out:
         print(f"wrote {stamped} (and {latest.name})")
 

@@ -23,8 +23,8 @@ each other.
   has to say whether the logical qubit flipped, faster than the hardware produces new rounds.
 - We're scored on accuracy (logical failure rate) and speed (µs per shot). The real test
   is whether the failure rate **falls as d grows**.
-- What we built: 4 decoders of our own (Cube-Collapse, Cube3D-Local, UnionFind3D,
-  Hierarchical). PyMatching is used only as the yardstick.
+- What we built: 6 decoders of our own (Cube-Collapse, Cube3D-Local, UnionFind3D,
+  Hierarchical, MWPM3D, Hierarchical + MWPM). PyMatching is used only as the yardstick.
 
 ## 2. Whiteboard: repetition code and union-find (2:00)
 Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between neighbours,
@@ -104,4 +104,8 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
   - Union-find is not MWPM; the gap grows with d (1.29× at d=9).
   - The fast path only pays off when shots are sparse.
   - All timings come from one laptop.
-- Next: a C/OpenMP backend, or our own MWPM tier for the hardest shots.
+- Third tier, measured: our own exact MWPM (MWPM3D; agrees with PyMatching on 16,771 of
+  16,772 shots) re-decodes shots where UF built a big cluster. At d=7 it brings failures from
+  101 to 84 (PyMatching: 75) but costs about 170× the time in pure Python. Figure:
+  `mwpm_tier_p0_5_latest.png`.
+- Next: a compiled matcher for the third tier, or a C/OpenMP backend for UF.

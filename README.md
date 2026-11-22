@@ -4,7 +4,7 @@ Fast, parallel decoders for the rotated surface code, written from scratch and b
 against PyMatching (minimum-weight perfect matching) under circuit-level noise in Stim.
 MidQWest Northrop Grumman decoder challenge.
 
-**What's here:** four decoders of our own, all on Stim's detector error model:
+**What's here:** six decoders of our own, all on Stim's detector error model:
 
 | Decoder | Registry name | One line |
 |---|---|---|
@@ -12,6 +12,8 @@ MidQWest Northrop Grumman decoder challenge.
 | Cube3D-Local | (fast path, not standalone) | mutual-isolation rules R1–R3 on the 3D space-time graph |
 | UnionFind3D | `union_find_3d` | weighted Delfosse–Nickerson union-find + peeling on the 3D graph |
 | Hierarchical | `hierarchical`, `hierarchical_partial` | Cube3D-Local first, UnionFind3D only when needed |
+| MWPM3D | `mwpm_3d` | our own exact minimum-weight perfect matching (Dijkstra + blossom), pure Python |
+| Hierarchical + MWPM | `hierarchical_mwpm` | three tiers: MWPM3D re-decodes shots where UF built a large cluster |
 
 PyMatching (plain and correlated) appears only as a reference baseline. It is never used
 inside our decoders.
@@ -33,7 +35,7 @@ pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib,
 | Quick smoke benchmark into a scratch folder | `python -m src.benchmark --quick --out scratch_results` |
 | One part only | `python -m src.benchmark --only accuracy` (or `sweep`, `threads`) |
 | Regenerate figures from saved CSVs | `python -m src.figures --accuracy results/accuracy_runtime_<ts>.csv --sweep results/sweep_<ts>.csv --threads results/thread_scaling_<ts>.csv` |
-| Milestone experiments | `python -m scripts.m1_uf_experiments`, `python -m scripts.m2_hierarchical` |
+| Milestone experiments | `python -m scripts.m1_uf_experiments`, `python -m scripts.m2_hierarchical`, `python -m scripts.m5_mwpm` |
 | Operating point (5 decoders, d = 3–9, 5 batches × 50k shots, numba on 1 thread) | `python -m src.operating_point` |
 
 Each benchmark writes CSVs to `results/` and figures to `results/plots/` as
@@ -139,6 +141,22 @@ rotated memory experiment (d rounds plus the final data-readout layer).
   NumPy/Python reference is bit-identical (tested).
 - **Deviation:** the plan allowed either gate. We measured both, and the partial gate costs
   accuracy (section 5), so whole-shot is the default.
+
+### 2.6 MWPM3D and the three-tier decoder (`src/decoders/cube3d/mwpm.py`, `three_tier.py`)
+- **MWPM3D, our own exact matching:**
+  - scipy Dijkstra from every lit detector over the 3D graph plus the boundary;
+  - a matching graph with one boundary copy per detector, solved by `networkx.max_weight_matching`
+    (exact blossom) on negated lengths;
+  - the prediction is the XOR of the observable bits along each matched shortest path.
+- **Sparse but exact:** a detector pair edge is kept only when it is shorter than sending both
+  detectors to the boundary, and boundary copies pair only along kept edges.
+- **Checked against PyMatching:** it agrees on **16,771 of 16,772** shots (the one difference is a
+  degenerate tie). It is exact, but the blossom is pure Python: 0.3–1.2 ms per shot at d = 3/5
+  and 7–42 ms at d = 7/9, p = 0.5%.
+- **Three tiers:** Hierarchical decodes every shot and reports the node count of UF's largest
+  final cluster. Shots above a threshold T (default 2·rounds) are re-decoded by MWPM3D.
+- **Complexity:** O(k³) blossom on k lit detectors plus k Dijkstra runs. Shots are
+  independent, so the routed shots could also run in parallel; they don't yet.
 
 ---
 
@@ -251,6 +269,23 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 | Hierarchical faster than UF3D | **partly met** | single thread: 1.2–3.0× faster where the fast path takes most shots (d ≤ 5 at p ≤ 0.2%, d=3 at p=0.5%, d=7 at p=0.1%); 0.95–1.0× elsewhere (fast path takes 0–30% of shots) |
 | Stretch: Hierarchical ≤ 1.5× PyMatching at d=7 | **met** | 1.166 / 1.010 = 1.15× |
 
+### Third tier: MWPM3D on UF's largest clusters (Milestone 5)
+Source: `results/mwpm/mwpm_tier_20261121_205911.csv`, `results/plots/mwpm_tier_p0_5_latest.png`.
+Circuit-level p = 0.5%, 10,000 shots, single thread. Time = Hierarchical batch time plus the
+MWPM time of the routed shots, per shot.
+
+| d | PyMatching | UnionFind3D | Hierarchical + MWPM (T, share routed) | µs/shot: UF → three tiers |
+|---|---|---|---|---|
+| 5 | 165 failures | 180 | 171 (T=5, 18.9%) | 2.26 → 228 |
+| 7 | 75 | 101 | 84 (T=14, 17.4%); 76 (T=7, 44%) | 6.78 → 1,155; 3,220 |
+| 9 | 72 | 90 | 78 (T=27, 15.6%) | 19.9 → 5,681 |
+
+- **The trigger finds UF's mistakes.** At d = 7/9 it removes about two-thirds of the UF-vs-PyMatching
+  gap while routing about 16% of shots.
+- **The cost is not acceptable:** 170–290× UF's time. To be practical the tier needs a compiled
+  matcher (a C/C++ blossom) or a cluster-local match instead of a whole-shot one.
+- **At p ≤ 0.2%** there were too few failures in 20,000 shots (0–66 per point) to measure a gain.
+
 ### Honest limitations
 - **Union-find is not minimum-weight matching.** The gap to PyMatching grows with d: 1.27× at
   d=9, p=0.5%, and 1.83× at d=9, p=0.2% (11 vs 6 failures, so the ratio is noisy). Correlated
@@ -264,13 +299,15 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 - **Timings come from one laptop.** Its absolute speed drifted up to 2.6× between sessions,
   and the sweep figure uses a single timing per point.
 - **Cube-Collapse is kept as a documented negative result.** Its LER rises with d (2.7 → 31%).
+- **MWPM3D is exact but slow** (pure-Python blossom), so the three-tier decoder is a
+  demonstration of the accuracy headroom, not a fast decoder.
 
 
 ---
 
 ## 6. Test suite
 
-`python -m pytest -q` runs 464 tests in about 50 s on the laptop: 439 pass, 24 are skipped (stub decoders) and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). Plots of the recorded metrics go to
+`python -m pytest -q` runs 509 tests in about 61 s on the laptop: 484 pass, 24 are skipped (stub decoders) and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). Plots of the recorded metrics go to
 `results/tests/<run>/` (`--no-plots` skips them).
 
 | File | What it checks |
@@ -283,6 +320,7 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 | `test_cube3d_uf.py` | UF: every component and DEM instruction exact, syndrome(correction) == events on random shots, numba == reference, every S/growth variant |
 | `test_cube3d_hierarchical.py` | local numba == reference (all K, strict on/off), Hierarchical numba == reference (both gates), gate semantics, K=0 equals UF |
 | `test_cc_*.py` | Cube-Collapse stages: filter series, graph vs code-capacity DEM, Clique fixtures, completion, exhaustive low-weight errors |
+| `test_cube3d_mwpm.py` | MWPM3D decodes every single DEM component exactly, agrees with PyMatching (≤ 1% of shots may differ by ties), three-tier routing semantics (T = ∞ equals Hierarchical, T = 0 sends every UF shot to MWPM) |
 | `test_figures.py` | each figure function on a tiny synthetic CSV; never-overwrite; style registry unique |
 | `test_operating_point.py` | PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D and Hierarchical at p = 0.5%, d = 3/5/7/9, 3 batches × 50k shots (`--op-batches`, `--op-shots`). Writes `results/operating_point/operating_point_run<N>.png`. At d=9, every 3D decoder beats d=7 with non-overlapping CIs, and 2D-on-flat gets worse |
 | `test_performance.py` | Stim stage timings and decoder µs/shot vs distance (recorded, loose bounds) |
@@ -306,7 +344,9 @@ src/
     cube3d/local.py        Cube3D-Local fast path (NumPy + numba)
     cube3d/union_find.py   UnionFind3D (Python reference + numba)
     cube3d/hierarchical.py Hierarchical (fused numba kernel + reference)
-scripts/                   milestone experiments (m1, m2)
+    cube3d/mwpm.py         MWPM3D (Dijkstra + networkx blossom)
+    cube3d/three_tier.py   Hierarchical + MWPM (three tiers)
+scripts/                   milestone experiments (m1, m2, m5)
 docs/                      specs, overnight plan, PROGRESS.md, talk_outline.md
 results/                   CSVs and figures (timestamped, never overwritten)
 ```

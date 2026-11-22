@@ -6,7 +6,7 @@ import pytest
 
 from src.decoders import DECODERS
 from src.figures import (DISPLAY_NAMES, STYLES, display_name, plot_accuracy_runtime,
-                         plot_cube_collapse_story, plot_fast_path_fraction, plot_sweep,
+                         plot_cube_collapse_story, plot_fast_path_fraction, plot_mwpm_tier, plot_sweep,
                          plot_thread_scaling, read_rows, save_figure, style_for, write_rows)
 
 META = {"cpu": "13th Gen Intel(R) Core(TM) i5-13420H", "power": "AC / Balanced", "logical_cpus": "12",
@@ -106,3 +106,14 @@ def test_csv_has_required_columns(tmp_path):
     for col in ("decoder", "d", "p", "rounds", "shots", "failures", "ler", "ci_low", "ci_high",
                 "us_per_shot", "threads", "backend", "fast_fraction", "git_commit"):
         assert col in header
+
+
+def test_mwpm_tier(tmp_path):
+    rows = [_row(n, d, 0.005, k=k, us=us) for d in (7, 9)
+            for n, k, us in (("PyMatching", 70, 8.0), ("UnionFind3D", 90, 7.0), ("Hierarchical", 90, 7.2))]
+    for d in (7, 9):
+        for T, k, us in ((d, 75, 3000.0), (2 * d, 82, 1100.0), (4 * d, 88, 240.0)):
+            r = _row("Hierarchical + MWPM", d, 0.005, k=k, us=us)
+            r.update(threshold=T, routed_fraction=0.4 / T)
+            rows.append(r)
+    _check(plot_mwpm_tier(_csv(tmp_path, "mwpm", rows), META), "mwpm_tier", tmp_path)
