@@ -1,7 +1,7 @@
 [project]
 name = "syndrome-hunters-ecc"
 version = "0.1.0"
-description = "Surface-code decoder hackathon: baseline, union-find and experimental decoders"
+description = "Surface-code decoders written from scratch: space-time union-find, correlated union-find and a hierarchical decoder, benchmarked against PyMatching."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
