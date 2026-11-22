@@ -18,6 +18,12 @@ in that order, each processing one color at a time, vectorized over shots and ce
 Gate: a shot is ACCEPTED iff 0 <= lit <= K before the rules and the rules clear every
 lit node. Rejected shots are routed whole to the deep tier; their partial work here is
 discarded. Prediction = XOR of the per-edge observable bits of flipped edges.
+With record_residual=True the uncleared detection events and the raw (not zeroed)
+observable bits are kept, so a "partial" gate can hand the residual to the deep tier.
+
+Backends: "reference" (NumPy, vectorized over shots and the centers of one color) and
+"numba" (per shot, parallel over shots). Within a color both evaluate every center
+against the state before that color and then apply all actions, so they are bit-identical.
 """
 
 from __future__ import annotations
@@ -25,10 +31,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from numba import njit, prange
 
 from src.decoders.cube3d.graph import DetectorGraph3D
 
 RULES = ("r1", "r2", "r3")
+LOCAL_BACKENDS = ("reference", "numba")
 
 
 @dataclass(frozen=True)
@@ -39,7 +47,7 @@ class Cube3DLocalConfig:
     def __post_init__(self) -> None:
         if self.K < 0:
             raise ValueError(f"K must be >= 0, got {self.K}")
-        if self.backend not in ("reference",):
+        if self.backend not in LOCAL_BACKENDS:
             raise ValueError(f"unknown backend {self.backend!r}")
 
 
@@ -47,6 +55,7 @@ class Cube3DLocalConfig:
 class LocalTables:
     ball2: np.ndarray          # (n, B) int32 nodes at graph distance 1..2, -1 padded
     color_groups: list[np.ndarray]
+    color: np.ndarray          # (n,) int32 color of each node
 
     @property
     def n_colors(self) -> int:
@@ -78,7 +87,7 @@ def build_tables(g: DetectorGraph3D) -> LocalTables:
         colors[u] = c
     groups = [np.flatnonzero(colors == c).astype(np.int32) for c in range(int(colors.max(initial=-1)) + 1)]
     ball2.setflags(write=False)
-    return LocalTables(ball2, groups)
+    return LocalTables(ball2, groups, colors)
 
 
 @dataclass(eq=False)
@@ -90,6 +99,8 @@ class LocalResult:
     n_colors: int
     flip_shot: np.ndarray | None = field(default=None, repr=False)  # flipped edges, if recorded
     flip_edge: np.ndarray | None = field(default=None, repr=False)
+    obs_bits: np.ndarray | None = field(default=None, repr=False)   # (shots,) raw uint64 bits
+    residual: np.ndarray | None = field(default=None, repr=False)   # (shots, n) uncleared events
 
     @property
     def accept_fraction(self) -> float:
@@ -103,7 +114,7 @@ def _gather(lit: np.ndarray, rows: np.ndarray, idx: np.ndarray) -> np.ndarray:
 
 
 def run_local(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndarray,
-              K: int = 6, record_flips: bool = False) -> LocalResult:
+              K: int = 6, record_flips: bool = False, record_residual: bool = False) -> LocalResult:
     dets = np.asarray(detection_events, dtype=bool)
     S = dets.shape[0]
     lit_count = dets.sum(axis=1, dtype=np.int32)
@@ -190,7 +201,259 @@ def run_local(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndar
     predictions[~accepted] = False
     flip_shot = np.concatenate(fs) if record_flips and fs else (np.zeros(0, np.int64) if record_flips else None)
     flip_edge = np.concatenate(fe) if record_flips and fe else (np.zeros(0, np.int32) if record_flips else None)
-    return LocalResult(predictions, accepted, lit_count, cleared, tables.n_colors, flip_shot, flip_edge)
+    residual = None
+    if record_residual:
+        residual = dets.copy()
+        residual[active] = lit
+    return LocalResult(predictions, accepted, lit_count, cleared, tables.n_colors, flip_shot, flip_edge,
+                       obs_bits if record_residual else None, residual)
+
+
+# ---- numba kernel ---------------------------------------------------------------------
+# Same schedule as run_local: R1, R2, R3; colors in order; within a color every center is
+# evaluated against the state before that color, then all actions are applied. Within a
+# color the actions touch disjoint nodes (centers are >= 3 apart), so apply order is free.
+# nlc[v] = number of lit neighbors of v, maintained incrementally; it prunes candidates
+# before the distance-2 counts (a lit neighbor is always inside the distance-2 ball).
+CHUNK = 64
+
+
+@njit(cache=True)
+def _count_lit(lit, idx):
+    k = 0
+    for j in range(idx.shape[0]):
+        v = idx[j]
+        if v >= 0 and lit[v]:
+            k += 1
+    return k
+
+
+@njit(cache=True)
+def local_work(n, n_colors):
+    """Scratch workspace for local_shot (clean state; local_shot leaves it clean again)."""
+    return (np.zeros(n, np.int32),             # 0 nlc: lit-neighbor count
+            np.empty(n, np.int32),             # 1 lit list
+            np.empty(n, np.int32),             # 2 candidates
+            np.empty(n, np.int32),             # 3 candidates bucketed by color
+            np.zeros(n, np.bool_),             # 4 seen (R2 candidates)
+            np.zeros(n_colors + 1, np.int32),  # 5 bucket starts
+            np.zeros(n_colors, np.int32),      # 6 bucket fill
+            np.empty(n, np.int32),             # 7 action node a
+            np.empty(n, np.int32),             # 8 action node b
+            np.empty(n, np.int32),             # 9 action edge 1
+            np.empty(n, np.int32),             # 10 action edge 2
+            np.empty(n, np.int32))             # 11 initially lit nodes (for the reset)
+
+
+@njit(cache=True)
+def _clear(lit, nlc, nbr, x):
+    lit[x] = 0
+    for j in range(nbr.shape[1]):
+        w = nbr[x, j]
+        if w >= 0:
+            nlc[w] -= 1
+
+
+@njit(cache=True)
+def local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits, cleared,
+               work):
+    """Apply R1, R2, R3 in place on one shot's lit (uint8, n). Adds cleared counts per rule
+    to cleared (3,). Returns (observable bits of the flipped edges, lit nodes remaining)."""
+    (nlc, litlist, cand, by_color, seen, start, fill, act_a, act_b, act_e, act_f, init) = work
+    n = lit.shape[0]
+    D = nbr.shape[1]
+    nlit = 0
+    for v in range(n):
+        if lit[v]:
+            litlist[nlit] = v
+            init[nlit] = v
+            nlit += 1
+    n_init = nlit
+    m = nlit
+    bits = np.uint64(0)
+    if nlit == 0:
+        return bits, 0
+    for i in range(nlit):
+        v = litlist[i]
+        for j in range(D):
+            w = nbr[v, j]
+            if w >= 0:
+                nlc[w] += 1
+
+    for rule in range(3):
+        if nlit == 0:
+            break
+        # compact the lit list
+        k2 = 0
+        for i in range(m):
+            v = litlist[i]
+            if lit[v]:
+                litlist[k2] = v
+                k2 += 1
+        m = k2
+        # Candidates at the start of the rule. Lit nodes and lit-neighbor counts only ever
+        # decrease, so every center the reference could act on later in this rule is here.
+        # (A node cleared by R2 has no lit neighbor left, so it never becomes an R2 center.)
+        nc = 0
+        if rule == 1:
+            for i in range(m):
+                v = litlist[i]
+                for j in range(D):
+                    c = nbr[v, j]
+                    if c >= 0 and not lit[c] and not seen[c] and nlc[c] >= 2:
+                        seen[c] = True
+                        cand[nc] = c
+                        nc += 1
+            for i in range(nc):
+                seen[cand[i]] = False
+        elif rule == 0:
+            for i in range(m):
+                v = litlist[i]
+                if nlc[v] >= 1:
+                    cand[nc] = v
+                    nc += 1
+        else:
+            for i in range(m):
+                v = litlist[i]
+                if boundary_edge[v] >= 0:
+                    cand[nc] = v
+                    nc += 1
+        if nc == 0:
+            continue
+        for k in range(n_colors + 1):
+            start[k] = 0
+        for i in range(nc):
+            start[color[cand[i]] + 1] += 1
+        for k in range(n_colors):
+            start[k + 1] += start[k]
+            fill[k] = start[k]
+        for i in range(nc):
+            k = color[cand[i]]
+            by_color[fill[k]] = cand[i]
+            fill[k] += 1
+
+        for col in range(n_colors):
+            na = 0
+            for i in range(start[col], start[col + 1]):
+                c = by_color[i]
+                if rule == 0:  # R1: mutually isolated adjacent pair
+                    if not lit[c] or nlc[c] != 1:
+                        continue
+                    jj = -1
+                    for j in range(D):
+                        v = nbr[c, j]
+                        if v >= 0 and lit[v]:
+                            jj = j
+                            break
+                    v = nbr[c, jj]
+                    if nlc[v] != 1:
+                        continue
+                    act_a[na] = c
+                    act_b[na] = v
+                    act_e[na] = nbr_edge[c, jj]
+                    na += 1
+                elif rule == 1:  # R2: isolated pair two steps apart through unlit c
+                    if nlc[c] != 2:
+                        continue
+                    ja = -1
+                    jb = -1
+                    for j in range(D):
+                        v = nbr[c, j]
+                        if v >= 0 and lit[v]:
+                            if ja < 0:
+                                ja = j
+                            else:
+                                jb = j
+                                break
+                    a = nbr[c, ja]
+                    b = nbr[c, jb]
+                    if nlc[a] > 1 or nlc[b] > 1:
+                        continue
+                    if _count_lit(lit, ball2[a]) != 1 or _count_lit(lit, ball2[b]) != 1:
+                        continue
+                    act_a[na] = a
+                    act_b[na] = b
+                    act_e[na] = nbr_edge[c, ja]
+                    act_f[na] = nbr_edge[c, jb]
+                    na += 1
+                else:  # R3: isolated node next to the boundary
+                    if not lit[c] or nlc[c] != 0:
+                        continue
+                    if _count_lit(lit, ball2[c]) != 0:
+                        continue
+                    act_a[na] = c
+                    act_e[na] = boundary_edge[c]
+                    na += 1
+            for i in range(na):  # apply after evaluating the whole color (snapshot semantics)
+                _clear(lit, nlc, nbr, act_a[i])
+                bits ^= edge_obs_bits[act_e[i]]
+                if rule == 2:
+                    cleared[2] += 1
+                    nlit -= 1
+                else:
+                    _clear(lit, nlc, nbr, act_b[i])
+                    if rule == 1:
+                        bits ^= edge_obs_bits[act_f[i]]
+                    cleared[rule] += 2
+                    nlit -= 2
+
+    # restore the workspace: nlc is nonzero only next to initially lit nodes
+    for i in range(n_init):
+        v = init[i]
+        for j in range(D):
+            w = nbr[v, j]
+            if w >= 0:
+                nlc[w] = 0
+    return bits, nlit
+
+
+@njit(parallel=True, cache=True)
+def _local_batch(dets, K, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits,
+                 out_bits, out_rem, out_cleared, residual, out_lit):
+    record = residual.shape[0] > 0
+    S = dets.shape[0]
+    n = dets.shape[1]
+    nchunk = (S + CHUNK - 1) // CHUNK
+    for ci in prange(nchunk):
+        work = local_work(n, n_colors)
+        lit = np.empty(n, np.uint8)
+        for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
+            c = 0
+            for v in range(n):
+                lit[v] = dets[s, v]
+                if lit[v]:
+                    c += 1
+            out_lit[s] = c
+            if c == 0 or c > K:
+                out_rem[s] = c
+            else:
+                b, rem = local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
+                                    edge_obs_bits, out_cleared[s], work)
+                out_bits[s] = b
+                out_rem[s] = rem
+            if record:
+                residual[s] = lit
+
+
+def run_local_numba(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndarray,
+                    K: int = 6, record_residual: bool = False) -> LocalResult:
+    dets = np.ascontiguousarray(detection_events, dtype=np.uint8)
+    S = dets.shape[0]
+    bits = np.zeros(S, np.uint64)
+    rem = np.zeros(S, np.int32)
+    cl = np.zeros((S, 3), np.int32)
+    residual = np.zeros((S, g.n_det) if record_residual else (0, g.n_det), np.uint8)
+    lit_count = np.zeros(S, np.int32)
+    _local_batch(dets, min(int(K), g.n_det), g.nbr, g.nbr_edge, tables.ball2, g.boundary_edge,
+                 tables.color, tables.n_colors, g.edge_obs_bits, bits, rem, cl, residual, lit_count)
+    accepted = rem == 0
+    shifts = np.arange(g.n_obs, dtype=np.uint64)
+    predictions = ((bits[:, None] >> shifts) & np.uint64(1)).astype(bool)
+    predictions[~accepted] = False
+    cleared = {r: cl[:, i].copy() for i, r in enumerate(RULES)}
+    return LocalResult(predictions, accepted, lit_count, cleared,
+                       tables.n_colors, None, None, bits if record_residual else None,
+                       residual.astype(bool) if record_residual else None)
 
 
 class Cube3DLocal:
@@ -208,9 +471,15 @@ class Cube3DLocal:
         return self.tables.n_colors
 
     def run(self, detection_events: np.ndarray, K: int | None = None,
-            record_flips: bool = False) -> LocalResult:
+            record_flips: bool = False, record_residual: bool = False,
+            backend: str | None = None) -> LocalResult:
         dets = np.asarray(detection_events, dtype=bool)
         if dets.ndim != 2 or dets.shape[1] != self.graph.n_det:
             raise ValueError(f"expected (shots, {self.graph.n_det}), got {dets.shape}")
-        return run_local(self.graph, self.tables, dets,
-                         self.config.K if K is None else K, record_flips)
+        K = self.config.K if K is None else K
+        backend = backend or self.config.backend
+        if backend == "numba":
+            if record_flips:
+                raise ValueError("record_flips is only available on the reference backend")
+            return run_local_numba(self.graph, self.tables, dets, K, record_residual)
+        return run_local(self.graph, self.tables, dets, K, record_flips, record_residual)

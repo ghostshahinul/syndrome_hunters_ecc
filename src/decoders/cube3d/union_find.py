@@ -206,6 +206,11 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
 
 
 # ---- numba kernel ---------------------------------------------------------------------
+# Shots are processed in chunks of CHUNK; each chunk allocates one scratch workspace and
+# resets only the entries a shot touched, so a shot costs O(cluster size), not O(n + E).
+CHUNK = 64
+
+
 @njit(cache=True)
 def _find(parent, x):
     root = x
@@ -219,30 +224,45 @@ def _find(parent, x):
 
 
 @njit(cache=True)
-def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest):
+def uf_work(n, E):
+    """Scratch workspace for _uf_shot (clean state; _uf_shot leaves it clean again)."""
+    return (np.arange(n + 1).astype(np.int32),  # 0 parent
+            np.zeros(n + 1, np.int32),           # 1 rank
+            np.zeros(n + 1, np.uint8),           # 2 parity
+            np.zeros(n + 1, np.bool_),           # 3 touches boundary
+            np.ones(n + 1, np.int32),            # 4 cluster size (nodes)
+            np.zeros(n + 1, np.bool_),           # 5 in_cluster
+            np.empty(n, np.int32),               # 6 visited nodes
+            np.zeros(E, np.int32),               # 7 support
+            np.zeros(E, np.bool_),               # 8 grown
+            np.empty(E, np.int32),               # 9 newly grown this round
+            np.zeros(n + 1, np.bool_),           # 10 active
+            np.empty(E, np.int32),               # 11 edges with support > 0
+            np.zeros(n + 1, np.bool_),           # 12 marked (peeling BFS)
+            np.empty(n + 1, np.int32),           # 13 tree_edge
+            np.empty(n + 1, np.int32),           # 14 tree_parent
+            np.empty(n, np.int32),               # 15 BFS order
+            np.empty(n + 1, np.int32),           # 16 queue
+            np.zeros(n + 1, np.bool_))           # 17 defect
+
+
+@njit(cache=True)
+def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work):
+    (parent, rank, parity, touches, size, in_cluster, visited, support, grown, newly,
+     active, touched, marked, tree_edge, tree_parent, order, queue, defect) = work
     n = row.shape[0]
     B = n
-    E = edge_u.shape[0]
     D = inc_edge.shape[1]
-    parent = np.arange(n + 1).astype(np.int32)
-    rank = np.zeros(n + 1, np.int32)
-    parity = np.zeros(n + 1, np.uint8)
-    touches = np.zeros(n + 1, np.bool_)
-    size = np.ones(n + 1, np.int32)
-    in_cluster = np.zeros(n + 1, np.bool_)
-    visited = np.empty(n, np.int32)
     nvis = 0
-    support = np.zeros(E, np.int32)
-    grown = np.zeros(E, np.bool_)
-    newly = np.empty(E, np.int32)
-    active = np.zeros(n + 1, np.bool_)
-
     for v in range(n):
         if row[v]:
             parity[v] = 1
             in_cluster[v] = True
             visited[nvis] = v
             nvis += 1
+    if nvis == 0:
+        return np.uint64(0), True
+    ntouched = 0
 
     ok = True
     while True:
@@ -277,6 +297,9 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                 if grown[e] or support[e] >= length[e]:
                     continue
                 growable = True
+                if support[e] == 0:
+                    touched[ntouched] = e
+                    ntouched += 1
                 support[e] += 1
                 if support[e] >= length[e]:
                     newly[nnew] = e
@@ -313,12 +336,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                 size[ra] += size[rb]
 
     # Peeling forest: BFS from boundary, then from cluster nodes in ascending id.
-    marked = np.zeros(n + 1, np.bool_)
-    tree_edge = np.full(n + 1, -1, np.int32)
-    tree_parent = np.full(n + 1, -1, np.int32)
-    order = np.empty(n, np.int32)
     norder = 0
-    queue = np.empty(n + 1, np.int32)
     for step in range(n + 1):
         root = B if step == 0 else step - 1
         if step > 0 and (not in_cluster[root] or marked[root]):
@@ -366,8 +384,8 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                     queue[qt] = y
                     qt += 1
 
-    defect = np.zeros(n + 1, np.bool_)
-    for v in range(n):
+    for i in range(nvis):
+        v = visited[i]
         defect[v] = row[v] != 0
     bits = np.uint64(0)
     record = corr.shape[0] > 0
@@ -382,20 +400,43 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
             defect[y] = False
             if p != B:
                 defect[p] = not defect[p]
-    for v in range(n):
+
+    # check and restore the workspace (only touched entries)
+    for i in range(nvis):
+        v = visited[i]
         if defect[v]:
             ok = False
+        parent[v] = v
+        rank[v] = 0
+        parity[v] = 0
+        touches[v] = False
+        size[v] = 1
+        in_cluster[v] = False
+        active[v] = False
+        marked[v] = False
+        defect[v] = False
+    marked[B] = False
+    for i in range(ntouched):
+        e = touched[i]
+        support[e] = 0
+        grown[e] = False
     return bits, ok
 
 
 @njit(parallel=True, cache=True)
 def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
               smallest):
-    for s in prange(dets.shape[0]):
-        b, ok = _uf_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                         smallest)
-        out_bits[s] = b
-        out_ok[s] = ok
+    S = dets.shape[0]
+    n = dets.shape[1]
+    E = edge_u.shape[0]
+    nchunk = (S + CHUNK - 1) // CHUNK
+    for ci in prange(nchunk):
+        work = uf_work(n, E)
+        for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
+            b, ok = _uf_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
+                             smallest, work)
+            out_bits[s] = b
+            out_ok[s] = ok
 
 
 def bits_to_bool(bits: np.ndarray, n_obs: int) -> np.ndarray:
