@@ -40,6 +40,9 @@ def test_benchmark_scores_the_saved_shots_and_reports_paired_counts(tmp_path):
                                seed=4, data_dir=tmp_path, repeats=1, batch_size=113, latency_shots=8)
     assert candidate["sample_sha256"] == ref["sample_sha256"]
     assert candidate["num_errors"] - ref["num_errors"] == candidate["decoder_only_errors"] - candidate["ref_only_errors"]
+    assert ref["fault_join_only_errors"] == candidate["decoder_only_errors"]
+    assert ref["alternative_only_errors"] == candidate["ref_only_errors"]
+    assert ref["vs_fault_join_p"] == pytest.approx(candidate["paired_p"])
     assert candidate["ler_low95"] <= candidate["logical_error_rate"] <= candidate["ler_high95"]
     assert 0 < candidate["us_per_shot"] and 0 < candidate["single_p50_us"] <= candidate["single_p95_us"]
     lo, hi = wilson(0, shots)

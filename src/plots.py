@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.colors import CenteredNorm, LinearSegmentedColormap, SymLogNorm
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
 import numpy as np
 
@@ -194,15 +195,105 @@ def plot_tradeoff(rows, out_dir=FIGURES_DIR, p=None):
             if r["distance"] == d:
                 _, color, marker = _style(r["decoder"])
                 _accuracy_points(ax, [r], [r["us_per_shot"]], color, marker, connect=False)
-        max_time = max(r["us_per_shot"] for r in pts if r["distance"] == d)
-        ax.set(title=f"Distance {d}", xlim=(0, max_time * 1.13))
-        ax.set_xlabel("Batch time per shot (µs)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=3))
+        times = [r["us_per_shot"] for r in pts if r["distance"] == d]
+        low, high = min(times), max(times)
+        ax.set_title(f"Distance {d}")
+        if low > 0 and high / low >= 10:
+            ax.set_xscale("log")
+            ax.set_xlim(low / 1.3, high * 1.3)
+            ax.set_xlabel("Batch time per shot (µs, log scale)")
+            ax.xaxis.set_major_locator(LogLocator(base=10, subs=[1, 2, 5] if high / low < 80 else [1]))
+            ax.xaxis.set_minor_formatter(NullFormatter())
+        else:
+            ax.set_xlim(0, high * 1.13)
+            ax.set_xlabel("Batch time per shot (µs)")
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=3))
         ax.xaxis.set_major_formatter(PLAIN)
         _axes(ax)
     axes.flat[0].set_ylabel("Logical failures (%)")
     return _save(fig, out_dir, "accuracy_runtime.png",
                  "Lower and further left is better. Whiskers show 95% Wilson intervals for the failure rate.")
+
+
+def plot_baseline_comparison(rows, out_dir=FIGURES_DIR):
+    """Compare FaultJoin with the best observed control for each metric and point."""
+    controls = {r["decoder"] for r in rows} - {"fault_join"}
+    if not controls or not any(r["decoder"] == "fault_join" for r in rows):
+        return None
+    distances = sorted({r["distance"] for r in rows})
+    noise = sorted({r["p"] for r in rows})
+    by_point = {}
+    for row in rows:
+        by_point.setdefault((row["distance"], row["p"]), {})[row["decoder"]] = row
+
+    delta = np.full((len(distances), len(noise)), np.nan)
+    ratio = np.full_like(delta, np.nan)
+    for i, distance in enumerate(distances):
+        for j, p in enumerate(noise):
+            group = by_point.get((distance, p), {})
+            if "fault_join" not in group or not controls.issubset(group):
+                continue
+            candidate = group["fault_join"]
+            best_rate = min(group[name]["logical_error_rate"] for name in controls)
+            fastest = min(group[name]["us_per_shot"] for name in controls)
+            delta[i, j] = round(10000 * (candidate["logical_error_rate"] - best_rate), 9)
+            if fastest > 0 and candidate["us_per_shot"] > 0:
+                ratio[i, j] = candidate["us_per_shot"] / fastest
+    if not np.isfinite(delta).any():
+        return None
+    colors = LinearSegmentedColormap.from_list("relative", ["#195777", "#f7f5ed", "#a64a24"])
+    colors.set_bad("#e5e9ea")
+    span = max(1., np.nanmax(abs(delta)))
+    log_ratio = np.log2(ratio)
+    log_span = max(1., np.nanmax(abs(log_ratio))) if np.isfinite(log_ratio).any() else 1.
+    fig, axes = plt.subplots(1, 2, figsize=(max(12, 1.5 * len(noise)), max(6.2, 3.3 + .65 * len(distances))))
+    fig.subplots_adjust(left=.075, right=.965, top=.71, bottom=.275, wspace=.22)
+    _header(fig, rows, "FaultJoin across physical noise levels", "observed baseline at each point")
+    panels = [
+        (delta, delta, SymLogNorm(linthresh=1., vmin=-span, vmax=span),
+         "Excess failures per 10,000 shots", "Negative values favor FaultJoin"),
+        (log_ratio, ratio, CenteredNorm(vcenter=0, halfrange=log_span),
+         "Batch time relative to the fastest baseline", "Values below 1× favor FaultJoin"),
+    ]
+    for panel, (ax, (heat, labels, norm, title, guide)) in enumerate(zip(axes, panels)):
+        ax.imshow(np.ma.masked_invalid(heat), norm=norm, cmap=colors, aspect="auto", interpolation="nearest")
+        ax.set_title(title, loc="left", fontsize=12.5, fontweight="bold", pad=10)
+        ax.set(xticks=np.arange(len(noise)), xticklabels=[f"{100*p:g}" for p in noise],
+               yticks=np.arange(len(distances)), yticklabels=distances,
+               xlabel="Physical error probability per noise channel (%)", ylabel="Code distance")
+        ax.set_xticks(np.arange(len(noise) + 1) - .5, minor=True)
+        ax.set_yticks(np.arange(len(distances) + 1) - .5, minor=True)
+        ax.grid(which="minor", color="white", linewidth=1.4)
+        ax.tick_params(which="both", length=0, pad=5)
+        ax.spines[:].set_visible(False)
+        for (i, j), value in np.ndenumerate(labels):
+            label, ink = "—", "#53656b"
+            if np.isfinite(value):
+                label = (f"{value:.2f}×" if panel else
+                         (f"{value:+.2f}".rstrip("0").rstrip(".") if value else "0"))
+                shade = colors(norm(heat[i, j]))
+                ink = "white" if np.dot(shade[:3], [.2126, .7152, .0722]) < .48 else "#142d3a"
+            ax.text(j, i, label, ha="center", va="center", color=ink, fontsize=11, fontweight="bold")
+        ax.text(0, -.265, guide, transform=ax.transAxes, fontsize=10, color="#314954", fontweight="bold")
+    return _save(fig, out_dir, "baseline_comparison.png",
+                 "Each metric uses its best observed baseline at the same distance and noise. "
+                 "A dash marks an incomplete comparison.")
+
+
+def default_files():
+    """Prefer a local benchmark, otherwise combine the published Z-memory sweeps."""
+    local = sorted(RESULTS_DIR.glob("bench_*.csv"))
+    if local:
+        return local[-1:]
+    files = []
+    for folder in ("confirm", "noise"):
+        for path in sorted((RESULTS_DIR / folder).glob("bench_*.csv"), reverse=True):
+            with path.open(newline="", encoding="utf-8") as stream:
+                first = next(csv.DictReader(stream), {})
+            if first.get("basis") == "z":
+                files.append(path)
+                break
+    return files
 
 
 def main():
@@ -211,13 +302,14 @@ def main():
     ap.add_argument("--out-dir", type=Path, default=FIGURES_DIR)
     ap.add_argument("--p", type=float, help="noise level for the runtime and trade-off figures")
     args = ap.parse_args()
-    files = args.files or sorted(RESULTS_DIR.glob("bench_*.csv"))[-1:]
+    files = args.files or default_files()
     if not files:
         ap.error("no benchmark CSV found; run python -m src.evaluate first")
     rows = load_rows(files)
     for path in [*plot_threshold(rows, args.out_dir), plot_latency(rows, args.out_dir, args.p),
-                 plot_tradeoff(rows, args.out_dir, args.p)]:
-        print(f"wrote {path}")
+                 plot_tradeoff(rows, args.out_dir, args.p), plot_baseline_comparison(rows, args.out_dir)]:
+        if path is not None:
+            print(f"wrote {path}")
 
 
 if __name__ == "__main__":

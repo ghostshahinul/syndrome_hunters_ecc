@@ -11,6 +11,7 @@ SHOTS     ?= 50000
 DECODERS  ?= fault_join pymatching pymatching_correlated union_find
 SEED      ?= 20261121
 BASIS     ?= z
+PLOT_FILES ?=
 GRID      = --distances $(DISTANCES) --ps $(PS) --shots $(SHOTS) --seed $(SEED) --basis $(BASIS)
 
 .PHONY: install data bench plots test all
@@ -25,7 +26,7 @@ bench:
 	$(PY) -m src.evaluate --decoders $(DECODERS) $(GRID)
 
 plots:
-	$(PY) -m src.plots
+	$(PY) -m src.plots $(PLOT_FILES)
 
 test:
 	$(PY) -m pytest -q

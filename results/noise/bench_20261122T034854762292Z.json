@@ -1,5 +1,5 @@
 {
-  "created_utc": "2026-11-21T20:50:35.315898+00:00",
+  "created_utc": "2026-11-22T03:48:54.762292+00:00",
   "config": {
     "decoders": [
       "fault_join",
@@ -10,24 +10,24 @@
     "distances": [
       3,
       5,
-      7
+      7,
+      9
     ],
     "ps": [
       0.001,
       0.003,
-      0.005,
       0.007,
       0.01
     ],
-    "shots": 50000,
+    "shots": 40000,
     "basis": "z",
     "rounds": null,
-    "seed": 2026,
+    "seed": 9073102,
     "batch_size": 4096,
     "repeats": 3,
-    "latency_shots": 256,
+    "latency_shots": 64,
     "data_dir": null,
-    "out_dir": "results"
+    "out_dir": "results\\noise"
   },
   "python": "3.12.10",
   "platform": "Windows-11-10.0.26300-SP0",
@@ -41,5 +41,6 @@
     "matplotlib": "3.11.2"
   },
   "timing": "Median of repeated warmed serial batch passes. Sampling, scoring, setup and memory profiling excluded.",
+  "single_call": "Dedicated decode(syndrome) API for FaultJoin and both PyMatching modes. Median and p95.",
   "memory": "Python-traced peak MiB on one warm batch. Native allocations may be invisible."
 }

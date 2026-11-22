@@ -1,29 +1,27 @@
 {
-  "created_utc": "2026-11-21T20:55:00.869314+00:00",
+  "created_utc": "2026-11-22T03:50:36.803816+00:00",
   "config": {
     "decoders": [
-      "fault_join",
-      "pymatching",
-      "pymatching_correlated",
-      "union_find"
+      "fault_join"
     ],
     "distances": [
       3,
       5,
-      7
+      7,
+      9
     ],
     "ps": [
       0.005
     ],
-    "shots": 20000,
-    "basis": "x",
+    "shots": 100000,
+    "basis": "z",
     "rounds": null,
-    "seed": 20261122,
+    "seed": 9073101,
     "batch_size": 4096,
     "repeats": 3,
-    "latency_shots": 256,
+    "latency_shots": 128,
     "data_dir": null,
-    "out_dir": "results"
+    "out_dir": "E:\\hackathon\\syndrome_hunters_ecc\\results\\original"
   },
   "python": "3.12.10",
   "platform": "Windows-11-10.0.26300-SP0",

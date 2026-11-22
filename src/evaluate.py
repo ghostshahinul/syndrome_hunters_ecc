@@ -28,6 +28,7 @@ FIELDS = [
     "decoder", "distance", "rounds", "p", "basis", "shots", "seed", "sample_sha256",
     "num_errors", "logical_error_rate", "ler_stderr", "ler_low95", "ler_high95",
     "ref_only_errors", "decoder_only_errors", "paired_p",
+    "fault_join_only_errors", "alternative_only_errors", "vs_fault_join_p",
     "init_s", "warmup_s", "decode_s", "us_per_shot", "single_p50_us", "single_p95_us",
     "py_peak_mem_mb", "batch_size", "repeats", "latency_shots",
 ]
@@ -153,6 +154,13 @@ def benchmark(decoder_names, distances, ps, shots, basis="z", seed=0, *, rounds=
                     discordant = ref_only + own_only
                     row.update(ref_only_errors=ref_only, decoder_only_errors=own_only,
                                paired_p=binomtest(own_only, discordant).pvalue if discordant else 1.0)
+                if "fault_join" in scores:
+                    ours = scores["fault_join"][1]
+                    ours_only = int((ours & ~wrong).sum())
+                    other_only = int((wrong & ~ours).sum())
+                    pairs = ours_only + other_only
+                    row.update(fault_join_only_errors=ours_only, alternative_only_errors=other_only,
+                               vs_fault_join_p=binomtest(ours_only, pairs).pvalue if pairs else 1.0)
                 rows.append(row)
     return rows
 
@@ -170,7 +178,7 @@ def write_results(rows: list[dict], directory: Path = RESULTS_DIR, config=None) 
         "platform": platform.platform(), "cpu": platform.processor() or platform.machine(),
         "packages": {n: version(n) for n in ("stim", "pymatching", "numpy", "scipy", "numba", "matplotlib")},
         "timing": "Median of repeated warmed serial batch passes. Sampling, scoring, setup and memory profiling excluded.",
-        "single_call": "Dedicated decode(syndrome) API for FaultJoin and both PyMatching modes. Median and p95.",
+        "single_call": "Public decode(syndrome) API, including Python dispatch. Median and p95.",
         "memory": "Python-traced peak MiB on one warm batch. Native allocations may be invisible.",
     }
     with path.with_suffix(".json").open("x", encoding="utf-8") as f:

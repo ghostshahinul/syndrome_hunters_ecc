@@ -1,96 +1,62 @@
-"""FaultJoin: two-fault logical voting with syndrome-conditioned union–find."""
-
-from __future__ import annotations
-
+"""FaultJoin: exact logical posteriors, sparse path sums, and correlated matching."""
 import numpy as np
-import stim
-from numba import njit
+import pymatching
 
 from src.decoders.base import Decoder
-from src.decoders.condition import conditioned_graph
-from src.decoders.faults import logical_bits, read_model
-from src.decoders.join import join_decision, make_join
-from src.decoders.union_find import _grow_batch
-
-
-@njit(cache=True)
-def _one_vote(row, index, hits):
-    count = 0
-    for d in range(len(row)):
-        if row[d]:
-            hits[count] = d
-            count += 1
-            if count > index.max_hits:
-                break
-    return join_decision(hits, count, index)
-
-
-@njit(cache=True)
-def _vote_batch(dets, index):
-    shots, width = dets.shape
-    masks = np.zeros(shots, np.uint64)
-    pending = np.zeros(shots, np.bool_)
-    hits = np.empty(min(width, index.max_hits + 1), np.int32)
-    for shot in range(shots):
-        found, masks[shot] = _one_vote(dets[shot], index, hits)
-        pending[shot] = not found
-    return masks, pending
-
-
-@njit(cache=True)
-def _single(row, index, keep, graph, rules, logical_offset, num_observables):
-    hits = np.empty(min(len(row), index.max_hits + 1), np.int32)
-    found, frame = _one_vote(row, index, hits)
-    if not found and len(keep):
-        active = row[keep].reshape(1, -1)
-        context = (row.reshape(1, -1), rules[0], rules[1], rules[2], rules[3])
-        frame = _grow_batch(active, graph[0], graph[1], graph[2], graph[3], context)[0]
-    frame ^= logical_offset
-    prediction = np.empty(num_observables, np.bool_)
-    for i in range(num_observables):
-        prediction[i] = (frame >> np.uint64(i)) & np.uint64(1)
-    return prediction
+from src.decoders.exact import ExactFaultTable
+from src.decoders.soft_paths import SoftPathModel
+from src.decoders.faults import read_model
+from src.decoders.frontier import frontier_screen, path_model
+from src.decoders.sectors import sector_model
 
 
 class FaultJoinDecoder(Decoder):
     name = "fault_join"
 
-    def __init__(self, dem: stim.DetectorErrorModel):
+    def __init__(self, dem):
         super().__init__(dem)
         model = read_model(dem)
-        self.index = make_join(model.faults, self.num_detectors)
-        self.keep, self.graph, self.rules = conditioned_graph(model, self.num_detectors)
+        self.exact = ExactFaultTable.from_model(model, self.num_detectors, self.num_observables)
         self.offset = model.detector_offset if model.detector_offset.any() else None
-        self.frame = np.uint64(model.logical_offset)
-        # A single small-code shot can bypass batch allocation and JIT dispatch.
-        width = (self.num_detectors + 7) // 8
-        frames = np.unique(self.index.decisions)
-        answers = dict(zip(frames, logical_bits(frames ^ self.frame, self.num_observables)))
-        self.single_table = {int(key).to_bytes(width, "little"): answers[decision]
-                             for key, decision in zip(self.index.keys, self.index.decisions)}
+        self.frame = np.array([model.logical_offset & (1 << bit) for bit in range(self.num_observables)], dtype=bool)
+        self.paths = None
+        self.soft = None
+        if self.exact is None and self.num_observables == 1:
+            projected = read_model(sector_model(dem, center=True))
+            self.paths = path_model(projected, self.num_detectors)
+            if self.paths is not None:
+                self.soft = SoftPathModel(projected, self.num_detectors)
+        self.matching = pymatching.Matching.from_detector_error_model(
+            sector_model(dem, 0.5, center=True), enable_correlations=True)
+        self.matching.ensure_num_fault_ids(self.num_observables)
 
-    def decode(self, syndrome: np.ndarray) -> np.ndarray:
-        row = self._check_single(syndrome)
-        if self.offset is not None:
-            row = row ^ self.offset
-        if self.single_table:
-            answer = self.single_table.get(np.packbits(row, bitorder="little").tobytes())
-            if answer is not None:
-                return answer.copy()
-        return _single(np.ascontiguousarray(row), self.index, self.keep, self.graph, self.rules,
-                       self.frame, self.num_observables)
+    def decode_batch(self, detection_events):
+        rows = self._check_input(detection_events)
+        if not len(rows):
+            return np.empty((0, self.num_observables), dtype=bool)
+        if self.exact is not None:
+            answer, pending = self.exact.lookup(rows)
+            if not pending.any():
+                return answer
+            answer[pending] = self._complete(rows[pending])
+            return answer
+        return self._complete(rows)
 
-    def decode_batch(self, detection_events: np.ndarray) -> np.ndarray:
-        dets = self._check_input(detection_events)
-        if self.offset is not None:
-            dets = dets ^ self.offset
-        masks, pending = _vote_batch(dets, self.index)
-        if pending.any() and self.keep.size:
-            evidence = dets if pending.all() else dets[pending]
-            active = np.ascontiguousarray(evidence[:, self.keep])
-            masks[pending] = _grow_batch(active, *self.graph, (evidence, *self.rules))
-        return logical_bits(masks ^ self.frame, self.num_observables)
+    def _complete(self, rows):
+        centered = rows if self.offset is None else rows ^ self.offset
+        if self.paths is None:
+            answer = self.matching.decode_batch(centered, enable_correlations=True).astype(bool)
+        else:
+            decision, pending = frontier_screen(centered, *self.paths, 7, .005, 100.)
+            answer = decision[:, None]
+            if pending.any():
+                unresolved = np.flatnonzero(pending)
+                subset = centered[unresolved]
+                soft, defer = self.soft.predict(subset, min_margin=.65)
+                answer[unresolved, 0] = soft
+                if defer.any():
+                    answer[unresolved[defer]] = self.matching.decode_batch(subset[defer], enable_correlations=True)
+        return answer ^ self.frame
 
 
-# Preserve the scaffold's Python entry point.
 ExperimentalDecoder = FaultJoinDecoder
