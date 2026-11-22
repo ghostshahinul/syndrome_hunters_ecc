@@ -266,7 +266,10 @@ class UFEnsemble:
 
 class UFEnsembleDecoder(Decoder):
     name = "uf3d_ensemble"
-    single_fault_allowance = 2  # inherits correlated UF's two circuit d=3 cases (see union_find)
+    # The ensemble does not consult the single-fault table, and correlated UF without it
+    # mis-decodes 2 of the 286 circuit d=3 single faults. With the default M / sigma / seed the
+    # ensemble's perturbed variants currently get all 286 right, but nothing guarantees that.
+    single_fault_allowance = 2
 
     def __init__(self, dem: stim.DetectorErrorModel, config: EnsembleConfig | None = None):
         super().__init__(dem)
