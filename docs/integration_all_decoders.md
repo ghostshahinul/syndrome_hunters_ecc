@@ -35,23 +35,26 @@ version of the operating-point figure, a markdown table writer,
 `scripts/experiments/compare_all.py`, and an operating-point warm-up of 2,000 untimed shots instead of 16. The warm-up fix is
 needed because FaultJoin compiles its UF stage lazily and at d=3 none of the first 16 shots reached it.
 
-## Comparison: operating-point run 57
+## Comparison: operating-point run 60
 
 Circuit-level p = 0.5%, rotated Z memory, rounds = d, 5 batches × 50,000 = 250,000 shots per point
 (seeds 0–4, the same shots for every decoder), every decoder single-thread, AC power, "Best
-performance", numba cache cleared. Source: `results/operating_point/operating_point_run57.csv`;
-figures `operating_point_run57.png` (standard) and `operating_point_run57_dark.png` (slides).
+performance", numba cache cleared, clean commit `bacbec4`. Source:
+`results/operating_point/operating_point_run60.csv`. The figures `operating_point_run60.png` (standard)
+and `operating_point_run60_dark.png` (slides) plot batch time per shot (mean over the 5 batches)
+against logical failures, with the 95% Wilson interval on failures.
 
 | Decoder | d = 3 | d = 5 | d = 7 | d = 9 |
 |---|---|---|---|---|
-| PyMatching | 1.656% [1.607, 1.707]; 0.57 µs | 1.383% [1.338, 1.429]; 3.98 µs | 1.035% [0.996, 1.075]; 12.24 µs | 0.670% [0.638, 0.702]; 31.46 µs |
-| Correlated PyMatching | 1.625% [1.576, 1.675]; 1.31 µs | 1.076% [1.036, 1.117]; 10.98 µs | 0.609% [0.579, 0.640]; 34.45 µs | 0.299% [0.278, 0.321]; 87.25 µs |
-| UnionFind3D | 1.667% [1.617, 1.718]; 0.81 µs | 1.523% [1.476, 1.572]; 4.29 µs | 1.222% [1.180, 1.266]; 11.29 µs | 0.846% [0.811, 0.883]; 28.79 µs |
-| UF3D correlated | 1.608% [1.559, 1.658]; 1.40 µs | 1.234% [1.192, 1.278]; 7.85 µs | 0.859% [0.823, 0.896]; 19.21 µs | 0.511% [0.484, 0.540]; 47.19 µs |
-| Hierarchical | 1.703% [1.653, 1.755]; 0.80 µs | 1.236% [1.193, 1.280]; 8.14 µs | 0.859% [0.823, 0.896]; 20.12 µs | 0.511% [0.484, 0.540]; 48.90 µs |
-| FaultJoin | 1.596% [1.548, 1.646]; 0.53 µs | 1.282% [1.239, 1.327]; 7.57 µs | 0.842% [0.807, 0.878]; 23.79 µs | 0.477% [0.451, 0.505]; 55.46 µs |
+| PyMatching | 1.656% [1.607, 1.707]; 0.60 µs | 1.383% [1.338, 1.429]; 4.43 µs | 1.035% [0.996, 1.075]; 14.37 µs | 0.670% [0.638, 0.702]; 37.15 µs |
+| Correlated PyMatching | 1.625% [1.576, 1.675]; 1.62 µs | 1.076% [1.036, 1.117]; 12.21 µs | 0.609% [0.579, 0.640]; 41.04 µs | 0.299% [0.278, 0.321]; 105.60 µs |
+| UnionFind3D | 1.667% [1.617, 1.718]; 1.10 µs | 1.523% [1.476, 1.572]; 4.68 µs | 1.222% [1.180, 1.266]; 13.36 µs | 0.846% [0.811, 0.883]; 32.64 µs |
+| UF3D correlated | 1.608% [1.559, 1.658]; 1.48 µs | 1.234% [1.192, 1.278]; 8.32 µs | 0.859% [0.823, 0.896]; 22.70 µs | 0.511% [0.484, 0.540]; 55.54 µs |
+| Hierarchical | 1.703% [1.653, 1.755]; 0.85 µs | 1.236% [1.193, 1.280]; 9.07 µs | 0.859% [0.823, 0.896]; 24.95 µs | 0.511% [0.484, 0.540]; 59.58 µs |
+| FaultJoin | 1.596% [1.548, 1.646]; 0.57 µs | 1.282% [1.239, 1.327]; 8.71 µs | 0.842% [0.807, 0.878]; 29.03 µs | 0.477% [0.451, 0.505]; 70.04 µs |
 
-- **Our five decoders reproduce run 40's failure counts exactly**, since the seeds and shots are the same.
+- **Our five decoders reproduce run 40's failure counts exactly** (same seeds and shots), and so does
+  FaultJoin between runs 56, 57 and 60.
 - **FaultJoin vs plain PyMatching:**
   - FaultJoin is more accurate at d = 5/7/9, with non-overlapping CIs.
   - At d=3 the CIs overlap.
@@ -61,17 +64,19 @@ figures `operating_point_run57.png` (standard) and `operating_point_run57_dark.p
 - **Correlated PyMatching** is the most accurate at d ≥ 5.
 - **Time ÷ plain PyMatching, same run:**
 
-  | d | FaultJoin | Hierarchical |
-  |---|---|---|
-  | 3 | 0.93× | 1.41× |
-  | 5 | 1.90× | 2.04× |
-  | 7 | 1.94× | 1.64× |
-  | 9 | 1.76× | 1.55× |
+  | d | FaultJoin | Hierarchical | Correlated PyMatching |
+  |---|---|---|---|
+  | 3 | 0.94× | 1.41× | 2.68× |
+  | 5 | 1.97× | 2.04× | 2.75× |
+  | 7 | 2.02× | 1.74× | 2.86× |
+  | 9 | 1.89× | 1.60× | 2.84× |
 
-- **Absolute times are about 1.6× slower than run 40** on the same laptop (PyMatching d=9: 31.5 vs
-  19.1 µs). Compare times only within one run.
-- **Run 56** (same shots, 16-shot warm-up) is kept, but its FaultJoin d=3 time (19.91 µs) includes
-  FaultJoin's first-call JIT. It is superseded by run 57.
+- **The laptop ran slower today than in run 40** (PyMatching d=9: 37.2 vs 19.1 µs), so compare times
+  only within one run.
+- **Runs 56 and 57** (same shots) are kept for the record:
+  - run 56's FaultJoin d=3 time included FaultJoin's first-call JIT; fixed by the longer warm-up;
+  - runs 56 and 57 also drew fastest-to-slowest batch whiskers on the time axis, which the current
+    figures no longer do.
 
 ## NVIDIA Ising hybrid (`shahi_3`): not comparable, not run here
 
