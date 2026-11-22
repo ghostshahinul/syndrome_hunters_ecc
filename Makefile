@@ -8,7 +8,7 @@ endif
 DISTANCES ?= 3 5 7
 PS        ?= 0.001 0.003 0.005 0.007 0.01
 SHOTS     ?= 100000
-DECODERS  ?= pymatching union_find experimental
+DECODERS  ?= pymatching union_find_3d uf3d_correlated hierarchical
 
 .PHONY: install data bench plots test all benchmark benchmark-quick
 
