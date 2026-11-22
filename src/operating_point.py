@@ -178,7 +178,9 @@ def measure(distances=(3, 5, 7, 9), p: float = 0.005, shots: int = 50_000, seed:
                 dets, obs = sampler.sample(shots, separate_observables=True)
                 for label, decode in decoders.items():
                     if b == 0:
-                        decode(dets[:16])  # warm-up: numba JIT, first-call allocation, caches
+                        # warm-up (untimed): numba JIT, first-call allocation, caches. 2,000 shots so
+                        # lazily compiled paths (e.g. FaultJoin's UF stage, rare at d=3) compile here
+                        decode(dets[:2000])
                     t0 = time.perf_counter()
                     pred = decode(dets)
                     times[label].append(1e6 * (time.perf_counter() - t0) / shots)
