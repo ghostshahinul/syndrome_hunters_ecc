@@ -7,9 +7,9 @@ MidQWest Northrop Grumman decoder challenge.
 **Headline:** our **Hierarchical** decoder (local fast path, then **correlated two-pass
 union-find** whose second pass runs only on shots with a large first-pass cluster) beats plain
 PyMatching's accuracy with non-overlapping 95% CIs at d = 5, 7 and 9 under circuit-level noise at
-p = 0.5%. At d=9, for example: 0.511% [0.484, 0.540] vs 0.670% [0.638, 0.702], 250k shots. Single
+p = 0.5% (operating-point run 40). At d=9, for example: 0.511% [0.484, 0.540] vs 0.670% [0.638, 0.702], 250k shots. Single
 thread vs single thread it costs **1.58× (d=7) and 1.54× (d=9)** PyMatching's time: closer, but
-**not yet inside PyMatching's speed**. Correlated PyMatching is still more accurate (0.299% at d=9)
+**not yet inside PyMatching's speed**. Correlated PyMatching is still more accurate (0.299% at d=9, run 40)
 and 2.7× PyMatching's time.
 
 **What's here:** eight decoders of our own, all on Stim's detector error model:
@@ -170,10 +170,11 @@ rotated memory experiment (d rounds plus the final data-readout layer).
   *different* pulled in its own partners and broke single faults.
 - **Cost and exactness:** about 2× UF's work, since UF runs twice; all lengths are integers;
   numba is bit-identical to the Python reference.
-- **Single faults:** like correlated PyMatching (1 of 286), it is not exact on every single
-  fault. It mis-decodes 2 of the 286 circuit-level d=3 instructions (two three-component
-  hook faults, p = 3.3e-4), and is exact everywhere else we tested (up to 6,602
-  instructions at d=7).
+- **Single faults:** the two passes alone mis-decode 2 of the 286 circuit-level d=3
+  instructions (two three-component hook faults, p = 3.3e-4; correlated PyMatching misses 1).
+  The registered decoder (`uf3d_correlated`, `table=True`) first looks up syndromes with
+  1–4 events that are exactly one DEM fault's, so it decodes all 286 exactly
+  (`single_fault_allowance = 0`).
 - **Compared with correlated PyMatching:** that works with full matching and its own
   reweighting rule; ours is a cheaper heuristic on UF clusters.
 
@@ -274,8 +275,8 @@ mode, numba cache cleared and warmed up); time is the mean batch µs/shot. Sourc
 
 | d | PyMatching | Correlated PyMatching | UnionFind3D | UF3D correlated | **Hierarchical** | Hierarchical ÷ PM time |
 |---|---|---|---|---|---|---|
-| 3 | 1.656% [1.607, 1.707]; 0.28 µs | 1.625%; 0.85 µs | 1.667%; 0.56 µs | 1.608%; 0.81 µs | 1.703% [1.653, 1.755]; 0.45 µs | 1.61× |
-| 5 | 1.383% [1.338, 1.429]; 2.31 µs | 1.076% [1.036, 1.117]; 6.51 µs | 1.523%; 2.47 µs | 1.234%; 4.53 µs | **1.236% [1.193, 1.280]**; 4.66 µs | 2.02× |
+| 3 | 1.656% [1.607, 1.707]; 0.28 µs | 1.625%; 0.85 µs | 1.667%; 0.56 µs | 1.608%; 0.81 µs | 1.703% [1.653, 1.755]; 0.45 µs | 1.57× |
+| 5 | 1.383% [1.338, 1.429]; 2.31 µs | 1.076% [1.036, 1.117]; 6.51 µs | 1.523%; 2.47 µs | 1.234%; 4.53 µs | **1.236% [1.193, 1.280]**; 4.66 µs | 2.01× |
 | 7 | 1.035% [0.996, 1.075]; 8.05 µs | 0.609% [0.579, 0.640]; 21.60 µs | 1.222%; 7.36 µs | 0.859%; 12.40 µs | **0.859% [0.823, 0.896]**; 12.70 µs | **1.58×** |
 | 9 | 0.670% [0.638, 0.702]; 19.14 µs | 0.299% [0.278, 0.321]; 51.28 µs | 0.846%; 17.10 µs | 0.511%; 29.51 µs | **0.511% [0.484, 0.540]**; 29.55 µs | **1.54×** |
 
@@ -428,7 +429,11 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 - Hierarchical: 7.00 → 0.99 µs (7.1×) and 16.57 → 2.40 µs (6.9×).
 - Single-thread PyMatching: 8.53 and 19.53 µs.
 
-### Acceptance targets
+### Acceptance targets (benchmark run 1, commit `5e7b5ff`: plain-UF deep tier, 50k shots)
+
+In sweep run 1 (500k shots, correlated deep tier), Hierarchical at d=3 is *outside* its deep tier's
+95% CI for p ≥ 0.3% (see Honest limitations). At d = 5–9 the two differ by at most 0.0022
+percentage points.
 
 | Target | Status | Numbers (p = 0.5%) |
 |---|---|---|
@@ -456,19 +461,24 @@ MWPM time of the routed shots, per shot.
 
 ### Honest limitations
 - **"Beats PyMatching" means plain PyMatching only.** Correlated PyMatching is still clearly
-  more accurate, and our speed is about 2× plain PyMatching, not equal to it. The ensemble closes
-  most of the accuracy gap to correlated PyMatching, but only at 20–25× the cost.
-- **Correlated UF loses 2 of 286 single faults at circuit d=3,** like correlated PyMatching
-  loses 1, so it is not a strict distance-preserving decoder on every fault at d=3.
-- **Union-find is not minimum-weight matching.** The gap to PyMatching grows with d: 1.27× at
-  d=9, p=0.5%, and 1.83× at d=9, p=0.2% (11 vs 6 failures, so the ratio is noisy). Correlated
-  PyMatching is better still (0.278% at d=9).
+  more accurate (0.609% / 0.299% at d = 7/9 vs Hierarchical's 0.859% / 0.511%, run 40), and
+  Hierarchical's speed is 1.54–2.01× plain PyMatching single-thread at d = 5–9 (run 40), not
+  equal to it. The ensemble closes most of the accuracy gap to correlated PyMatching, but only at
+  20–25× the cost.
+- **The pass-2 gate threshold floor(rounds²/6.5) was fitted at p = 0.5% only;** at p = 0.2%
+  there are too few failures to validate its accuracy.
+- **Union-find is not minimum-weight matching.** Plain UnionFind3D's gap to PyMatching grows with
+  d: 1.10× / 1.18× / 1.26× at d = 5/7/9, p = 0.5% (run 40), and 1.58× at d=9, p=0.2% (57 vs 36
+  failures, sweep run 1, so that ratio is noisy).
 - **The fast path pays off only on sparse shots.** At d ≥ 7 and p = 0.5% it accepts ≤ 0.2% of
-  shots, and Hierarchical is UF plus a scan. At d=3 the fast path makes 4–9% more failures than
-  UF on the same shots (within the CI).
-- **The partial gate is not worth it:** it is less accurate at d ≥ 7 for p = 0.5% and slower.
+  shots (benchmark run 1), and Hierarchical is UF plus a scan. At d=3 the fast path costs
+  accuracy: Hierarchical fails 4.5–10% more often than its own deep tier (UF3D correlated) on
+  the same shots, with separate 95% CIs for p ≥ 0.3% (sweep run 1, 500k shots).
+- **The partial gate is not worth it:** it is less accurate at d ≥ 7 for p = 0.5% and slower
+  (benchmark run 1).
 - **p = 0.8% is above threshold for every decoder here,** PyMatching included: its LER is
-  4.06 → 4.89 → 5.24 → 5.31% for d = 3 → 9, and UF behaves the same way.
+  4.06 → 4.89 → 5.24 → 5.31% for d = 3 → 9, and UF behaves the same way (benchmark sweep run 1,
+  `results/sweep_20261121_202412.csv`).
 - **Timings come from one laptop.** Its absolute speed drifted up to 2.6× between sessions,
   and the sweep figure uses a single timing per point.
 - **Cube-Collapse is kept as a documented negative result.** Its LER rises with d (2.7 → 31%).
@@ -480,7 +490,11 @@ MWPM time of the routed shots, per shot.
 
 ## 6. Test suite
 
-`python -m pytest -q` runs 509 tests in about 61 s on the laptop: 484 pass, 24 are skipped (stub decoders) and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). Plots of the recorded metrics go to
+`python -m pytest -q` runs 803 tests: 802 pass, 0 are skipped and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). On the laptop it takes 313 s right after the numba cache is cleared (JIT compiles everything) and 103–208 s on later runs.
+The suite has two skip conditions, and neither fires on a full checkout:
+`conftest.build_or_skip` skips a registered decoder that raises `NotImplementedError`, which none do any more (the 24 skips
+in earlier counts were the `union_find` / `experimental` stubs, since deleted), and `test_golden.py` skips if
+`tests/golden/golden_outputs.npz` is missing. Plots of the recorded metrics go to
 `results/tests/<run>/` (`--no-plots` skips them).
 
 | File | What it checks |
@@ -509,6 +523,7 @@ src/
   benchmark.py             standard benchmark -> CSVs + figures
   figures.py               style registry + standard figures
   operating_point.py       accuracy vs batch time (used by pytest)
+  error_rate_sweep.py      LER vs p sweep: our-style, journal-style and slide figures, replot, Λ table
   decoders/
     base.py                Decoder interface; __init__.py holds the registry
     baseline.py            PyMatching wrapper (reference only)
@@ -517,9 +532,19 @@ src/
     cube3d/local.py        Cube3D-Local fast path (NumPy + numba)
     cube3d/union_find.py   UnionFind3D (Python reference + numba)
     cube3d/hierarchical.py Hierarchical (fused numba kernel + reference)
+    cube3d/ensemble.py     UF3D ensemble (M perturbed correlated-UF variants, parallel over shots or variants)
     cube3d/mwpm.py         MWPM3D (Dijkstra + networkx blossom)
     cube3d/three_tier.py   Hierarchical + MWPM (three tiers)
-scripts/                   milestone experiments (m1, m2, m5)
+scripts/
+  demo.py                  one-minute demo (python -m scripts.demo)
+  m1_uf_experiments.py, m2_hierarchical.py, m5_mwpm.py, item2_ensemble.py   milestone experiments
+  experiments/             one-off optimization tools (run from the repo root as python -m scripts.experiments.<name>)
+    opt_a_measure.py       Phase A: baseline timings and pass/cluster statistics before optimizing
+    opt_b_profile.py       Phase B: times current kernels against an older git revision's, in one process
+    opt_ab_compare.py      Phases C–E: compare decoder configurations on the same shots in one run
+    opt2_measure.py        final round, Step 1: how often and how expensively correlated UF's pass 2 matters
+    final_compare.py       final round, Step 5: Hierarchical on a branch vs on main, timed in one run
+    make_golden.py         writes tests/golden/golden_outputs.npz (bit-identity reference for test_golden.py)
 docs/                      specs, overnight plan, PROGRESS.md, talk_outline.md
 results/                   CSVs and figures (timestamped, never overwritten)
 ```
