@@ -662,3 +662,39 @@ the boundary scan over all boundary edges.
 **What this shows:** at the default S = 4 the growth loop isn't where the time goes. Correlated UF is
 two full UF passes; the lever is doing less in pass 2 (Phase D) and serving easy shots without UF
 (Phase C).
+
+Phase B commit: `dd31a12` (pushed).
+
+## Phase C: single-fault lookup table (00:29 to 00:38)
+**What was built**
+- **Table:** `graph.single_fault_table(dem)` maps the packed sorted syndrome of every DEM
+  instruction (1 to 4 detectors, 16 bits each) to its observable bits; if syndromes collide,
+  the most likely observable wins.
+  - **Checks:** every instruction in all 3 tiers × d = 3–9 lights 1–4 detectors, and **no
+    syndrome is ambiguous**.
+  - **Lookup:** binary search inside numba (`table_lookup`); the reference uses
+    `table_lookup_reference`.
+- **On by default:** `HierarchicalConfig(table=True)` and the `uf3d_correlated` registry entry
+  (`UnionFind3DConfig(correlated=True, table=True)`). Plain UF is unchanged.
+- **Tests:**
+  - **Every single DEM fault is exact** for correlated UF with the table (3 tiers × d = 3/5/7,
+    numba and reference) and for Hierarchical (both gates).
+  - `uf3d_correlated.single_fault_allowance` is back to **0**.
+  - numba equals the reference with the table on.
+  - The table changes only the shots it answers.
+- **Golden:** the golden configs pin `table=False`, so they keep checking the pre-table outputs
+  (unchanged).
+
+**Results** (`scripts/opt_ab_compare.py`, `results/optimization/phaseC_20261122_003716.csv`;
+5 × 50k = 250k shots per point, p = 0.5%, single thread, same shots for every config):
+
+| d | share of shots answered by the table | Hierarchical µs, off → on | UF3D correlated µs, off → on | LER effect |
+|---|---|---|---|---|
+| 3 | 39.3% | 0.55 → 0.48 | 1.41 → 0.86 | Hierarchical identical (1.703%); UF-corr 1.643 → 1.608% (within CI) |
+| 5 | 6.2% | 5.66 → 5.67 | 5.86 → 5.79 | identical |
+| 7 | 0.01% | 17.14 → 17.12 | 16.89 → 16.91 | identical |
+| 9 | 0% | 38.47 → 38.43 | 38.75 → 38.95 | identical |
+
+**Decision: keep.** The table makes every single fault exact and costs nothing measurable. It
+cannot help at d ≥ 7, where shots have about 25–56 events. Hierarchical ÷ PyMatching in this run:
+2.13× (d=5), 2.04× (d=7), 1.88× (d=9).

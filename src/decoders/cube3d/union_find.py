@@ -56,6 +56,7 @@ class UnionFind3DConfig:
     growth: str = "all"
     correlated: bool = False  # two-pass: reweight partners of pass-1 edges, decode again
     skip_ahead: bool = False  # exact skip-ahead growth (same results; pays off only at large scale)
+    table: bool = False       # answer 1-4-event shots that match a single DEM fault from a table
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
@@ -616,7 +617,7 @@ def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, c
 
 @njit(parallel=True, cache=True)
 def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
-              smallest, out_size, skip=False):
+              smallest, out_size, skip, tkeys, tvals, out_table):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -626,6 +627,11 @@ def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out
         lits = work[26]
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
             nlit = extract_lits(dets[s], lits)
+            hit, tb = table_lookup(lits, nlit, tkeys, tvals)
+            if hit:
+                out_bits[s] = tb
+                out_table[s] = True
+                continue
             b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
                              smallest, work, skip)
             out_bits[s] = b
@@ -697,7 +703,8 @@ def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, 
 
 @njit(parallel=True, cache=True)
 def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits,
-                         out_ok, smallest, out_size, cptr, cidx, clen, ccredit, skip=False):
+                         out_ok, smallest, out_size, cptr, cidx, clen, ccredit, skip, tkeys, tvals,
+                         out_table):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -714,6 +721,11 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
         none = np.zeros((0, 0), np.uint8)
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
             nlit = extract_lits(dets[s], lits)
+            hit, tb = table_lookup(lits, nlit, tkeys, tvals)
+            if hit:
+                out_bits[s] = tb
+                out_table[s] = True
+                continue
             b, ok = _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
                                         none, smallest, work, cptr, cidx, clen, ccredit, len2, mod,
                                         inside, keep, stat_keep, skip)
@@ -723,6 +735,48 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
             if record:  # correction of the final pass (each tree edge is flipped at most once)
                 for i in range(work[20][0]):
                     corr[s, work[19][i]] = 1
+
+
+@njit(cache=True)
+def table_lookup(lits, nlit, keys, vals):
+    """(found, observable bits) for the events lits[:nlit] in the single-fault table
+    (graph.fault_keys / fault_obs; keys are 4 x 16-bit sorted ids, unused slots 0xFFFF)."""
+    if nlit < 1 or nlit > 4 or keys.shape[0] == 0:
+        return False, np.uint64(0)
+    a0 = lits[0]
+    a1 = lits[1] if nlit > 1 else 0xFFFF
+    a2 = lits[2] if nlit > 2 else 0xFFFF
+    a3 = lits[3] if nlit > 3 else 0xFFFF
+    # sort the (at most 4) ids; padding 0xFFFF sorts last
+    if a0 > a1:
+        a0, a1 = a1, a0
+    if a2 > a3:
+        a2, a3 = a3, a2
+    if a0 > a2:
+        a0, a2 = a2, a0
+    if a1 > a3:
+        a1, a3 = a3, a1
+    if a1 > a2:
+        a1, a2 = a2, a1
+    key = np.uint64(a0) | (np.uint64(a1) << np.uint64(16)) | (np.uint64(a2) << np.uint64(32)) \
+        | (np.uint64(a3) << np.uint64(48))
+    i = np.searchsorted(keys, key)
+    if i < keys.shape[0] and keys[i] == key:
+        return True, vals[i]
+    return False, np.uint64(0)
+
+
+def table_lookup_reference(g: DetectorGraph3D, dets_row: np.ndarray):
+    """Reference lookup: (found, observable bits)."""
+    from src.decoders.cube3d.graph import TABLE_MAX_LIT, pack_syndrome
+    lit = np.flatnonzero(dets_row)
+    if not 1 <= len(lit) <= TABLE_MAX_LIT or g.fault_keys is None or len(g.fault_keys) == 0:
+        return False, 0
+    key = np.uint64(pack_syndrome(lit))
+    i = int(np.searchsorted(g.fault_keys, key))
+    if i < len(g.fault_keys) and g.fault_keys[i] == key:
+        return True, int(g.fault_obs[i])
+    return False, 0
 
 
 def bits_to_bool(bits: np.ndarray, n_obs: int) -> np.ndarray:
@@ -735,6 +789,7 @@ class UFResult:
     ok: np.ndarray                # (shots,) bool: every defect peeled
     correction: np.ndarray | None  # (shots, E) uint8 if requested
     max_cluster: np.ndarray | None = None  # (shots,) int32 nodes in the largest final cluster
+    table: np.ndarray | None = None  # (shots,) bool: answered by the single-fault table
 
 
 class UnionFind3D:
@@ -758,23 +813,33 @@ class UnionFind3D:
         bits = np.zeros(S, dtype=np.uint64)
         ok = np.ones(S, dtype=bool)
         size = np.zeros(S, dtype=np.int32)
+        table = np.zeros(S, dtype=bool)
+        use_table = self.config.table and g.fault_keys is not None
+        tkeys = g.fault_keys if use_table else np.zeros(0, np.uint64)
+        tvals = g.fault_obs if use_table else np.zeros(0, np.uint64)
         correlated = self.config.correlated
         if backend == "numba" and correlated:
             _uf_correlated_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                                  g.edge_obs_bits, corr, bits, ok, t.smallest, size,
-                                 t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit, t.skip)
+                                 t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit, t.skip, tkeys, tvals,
+                                 table)
         elif backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
-                      g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip)
+                      g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip, tkeys, tvals, table)
         else:
             shot_fn = uf_correlated_shot_reference if correlated else uf_decode_shot_reference
             for s in range(S):
+                if use_table:
+                    hit, tb = table_lookup_reference(g, dets[s])
+                    if hit:
+                        bits[s], table[s] = tb, True
+                        continue
                 st: dict = {}
                 b, flipped, good = shot_fn(g, t, dets[s], st)
                 bits[s], ok[s], size[s] = b, good, st["max_cluster"]
                 if record_correction:
                     corr[s, flipped] = 1
-        return UFResult(bits_to_bool(bits, g.n_obs), ok, corr if record_correction else None, size)
+        return UFResult(bits_to_bool(bits, g.n_obs), ok, corr if record_correction else None, size, table)
 
 
 class UnionFind3DDecoder(Decoder):
@@ -797,10 +862,10 @@ class UnionFind3DCorrelatedDecoder(UnionFind3DDecoder):
     """Two-pass correlated UF: pass 2 reweights the DEM partners of pass-1 edges."""
 
     name = "uf3d_correlated"
-    # Like correlated PyMatching (1 of 286), correlated decoding is not exact on every single
-    # fault: at circuit-level d=3 two three-component hook instructions lose to a pairing of
-    # two likelier correlated faults. Exact on every fault at d >= 5 and on the other tiers.
-    single_fault_allowance = 2
+    # With the single-fault table every single DEM fault decodes exactly (without it, two
+    # three-component hook instructions at circuit-level d=3 were lost to a pairing of two
+    # likelier correlated faults, as correlated PyMatching loses 1 of 286).
+    single_fault_allowance = 0
 
     def __init__(self, dem: stim.DetectorErrorModel, config: UnionFind3DConfig | None = None):
-        super().__init__(dem, config or UnionFind3DConfig(correlated=True))
+        super().__init__(dem, config or UnionFind3DConfig(correlated=True, table=True))

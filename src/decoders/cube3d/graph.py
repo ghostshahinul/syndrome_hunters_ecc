@@ -55,6 +55,9 @@ class DetectorGraph3D:
     corr_ptr: np.ndarray | None = None    # (E+1,) int32
     corr_idx: np.ndarray | None = None    # (P,) int32 partner edge f
     corr_joint: np.ndarray | None = None  # (P,) float64 P(e and f from one instruction)
+    # single-fault table: packed sorted syndrome of every DEM instruction -> observable bits
+    fault_keys: np.ndarray | None = None  # (F,) uint64 ascending (see pack_syndrome)
+    fault_obs: np.ndarray | None = None   # (F,) uint64 observable bits of the most likely fault
 
     @property
     def boundary(self) -> int:
@@ -215,12 +218,53 @@ def build_detector_graph(dem: stim.DetectorErrorModel) -> DetectorGraph3D:
     corr_idx = np.array([f for _, f in pairs], dtype=np.int32)
     corr_joint = np.array([joint[k] for k in pairs], dtype=np.float64)
 
+    fault_keys, fault_obs = single_fault_table(dem)
+
     arrays = (coords, edge_u, edge_v, edge_obs, obs_bits, prob, weight, etype,
               nbr, nbr_edge, degree, boundary_edge, inc_edge)
-    for arr in arrays + (corr_ptr, corr_idx, corr_joint):
+    for arr in arrays + (corr_ptr, corr_idx, corr_joint, fault_keys, fault_obs):
         arr.setflags(write=False)
     return DetectorGraph3D(n, n_obs, *arrays, n_components=n_components, n_undetectable=n_undetectable,
-                           corr_ptr=corr_ptr, corr_idx=corr_idx, corr_joint=corr_joint)
+                           corr_ptr=corr_ptr, corr_idx=corr_idx, corr_joint=corr_joint,
+                           fault_keys=fault_keys, fault_obs=fault_obs)
+
+
+TABLE_MAX_LIT = 4   # every circuit-level DEM instruction here lights 1-4 detectors
+_PAD = 0xFFFF
+
+
+def pack_syndrome(dets) -> int:
+    """Sorted detector ids (1 to 4 of them, each < 65535) -> one uint64 key, 16 bits per id,
+    unused slots 0xFFFF."""
+    key = 0
+    ds = sorted(int(x) for x in dets)
+    for i in range(TABLE_MAX_LIT):
+        key |= (ds[i] if i < len(ds) else _PAD) << (16 * i)
+    return key
+
+
+def single_fault_table(dem: stim.DetectorErrorModel) -> tuple[np.ndarray, np.ndarray]:
+    """Syndrome (XOR of all components) of every error instruction lighting 1-4 detectors ->
+    observable bits. If several instructions share a syndrome, the most likely observable wins
+    (summing the probabilities of instructions that agree)."""
+    if dem.num_detectors >= _PAD:
+        raise ValueError("single-fault table supports < 65535 detectors")
+    best: dict[int, dict[int, float]] = defaultdict(dict)
+    for p, comps in _instructions(dem):
+        dets: set[int] = set()
+        obs = 0
+        for d, o in comps:
+            dets ^= set(d)
+            for k in o:
+                obs ^= 1 << k
+        if not 1 <= len(dets) <= TABLE_MAX_LIT:
+            continue
+        key = pack_syndrome(dets)
+        best[key][obs] = best[key].get(obs, 0.0) + p
+    keys = np.array(sorted(best), dtype=np.uint64)
+    vals = np.array([max(best[int(k)].items(), key=lambda kv: (kv[1], -kv[0]))[0] for k in keys],
+                    dtype=np.uint64)
+    return keys, vals
 
 
 @lru_cache(maxsize=64)

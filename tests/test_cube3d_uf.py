@@ -227,3 +227,61 @@ def test_skip_ahead_growth_is_exact(tier, d, scale, correlated):
         np.testing.assert_array_equal(x.predictions, a.predictions)
         np.testing.assert_array_equal(x.correction, a.correction)
         np.testing.assert_array_equal(x.max_cluster, a.max_cluster)
+
+
+# ---- Phase C: single-fault table -----------------------------------------------------
+def dem_instruction_shots(tier, d):
+    dem = tier_circuit(tier, d, TIER_P[tier]).detector_error_model(decompose_errors=True)
+    rows, truth = [], []
+    for inst in dem.flattened():
+        if inst.type != "error":
+            continue
+        r = np.zeros(dem.num_detectors, dtype=np.uint8)
+        o = np.zeros(dem.num_observables, dtype=bool)
+        for t in inst.targets_copy():
+            if t.is_relative_detector_id():
+                r[t.val] ^= 1
+            elif t.is_logical_observable_id():
+                o[t.val] ^= True
+        rows.append(r)
+        truth.append(o)
+    return np.array(rows), np.array(truth)
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_table_makes_every_single_fault_exact(tier, d):
+    """With the table, correlated UF decodes EVERY single DEM fault exactly (no allowance)."""
+    g = detector_graph(tier, d, TIER_P[tier])
+    rows, truth = dem_instruction_shots(tier, d)
+    uf = UnionFind3D(g, UnionFind3DConfig(correlated=True, table=True))
+    res = uf.run(rows)
+    assert res.table.all()  # every instruction lights 1-4 detectors and is in the table
+    np.testing.assert_array_equal(res.predictions, truth)
+    ref = uf.run(rows, backend="reference")
+    np.testing.assert_array_equal(ref.predictions, truth)
+
+
+@pytest.mark.parametrize("correlated", [False, True])
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
+def test_table_numba_bit_identical_and_only_changes_table_shots(tier, d, correlated):
+    g = detector_graph(tier, d, TIER_P[tier])
+    dets, _ = sample(tier, d, 1500, seed=400 + d)
+    with_t = UnionFind3D(g, UnionFind3DConfig(correlated=correlated, table=True))
+    without = UnionFind3D(g, UnionFind3DConfig(correlated=correlated)).run(dets)
+    a = with_t.run(dets)
+    r = with_t.run(dets[:300], backend="reference")
+    np.testing.assert_array_equal(a.predictions[:300], r.predictions)
+    np.testing.assert_array_equal(a.table[:300], r.table)
+    np.testing.assert_array_equal(a.predictions[~a.table], without.predictions[~a.table])
+    assert not a.table[dets.sum(axis=1) > 4].any() and not a.table[dets.sum(axis=1) == 0].any()
+
+
+def test_pack_syndrome_matches_numba_lookup():
+    from src.decoders.cube3d.graph import pack_syndrome
+    from src.decoders.cube3d.union_find import table_lookup
+    keys = np.array(sorted([pack_syndrome([5]), pack_syndrome([3, 9]), pack_syndrome([1, 2, 7, 4])]),
+                    dtype=np.uint64)
+    vals = np.arange(3, dtype=np.uint64) + np.uint64(10)
+    for lits, want in (([9, 3], True), ([4, 7, 2, 1], True), ([5], True), ([5, 6], False), ([], False)):
+        hit, _ = table_lookup(np.array(lits + [0] * (4 - len(lits)), np.int32), len(lits), keys, vals)
+        assert hit == want, lits

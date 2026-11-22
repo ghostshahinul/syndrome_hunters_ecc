@@ -29,7 +29,8 @@ from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
 from src.decoders.cube3d.local import Cube3DLocal, Cube3DLocalConfig, local_shot, local_work
 from src.decoders.cube3d.union_find import (CHUNK, UnionFind3D, UnionFind3DConfig, _uf_correlated_shot,
-                                            _uf_shot, bits_to_bool, extract_lits, uf_correlated_shot_reference,
+                                            _uf_shot, bits_to_bool, extract_lits, table_lookup,
+                                            table_lookup_reference, uf_correlated_shot_reference,
                                             uf_decode_shot_reference, uf_work)
 
 GATES = ("whole_shot", "partial")
@@ -43,6 +44,7 @@ class HierarchicalConfig:
     K: int | None = None          # None -> DEFAULT_K[gate] (None there = no cap)
     backend: str = "numba"
     strict_r1: bool = False       # fast-path R1 pairs must be isolated within distance 2
+    table: bool = True            # 1-4-event shots matching a single DEM fault: answer from a table
     # Deep tier: correlated two-pass UF by default (item 4: it beats plain PyMatching's accuracy
     # at d = 7/9 at about 2x its single-thread time). UnionFind3DConfig() gives plain UF.
     uf: UnionFind3DConfig = field(default_factory=lambda: UnionFind3DConfig(correlated=True))
@@ -65,6 +67,11 @@ class HierarchicalResult:
     cleared: np.ndarray       # (shots,) int32 events cleared by the local rules
     ok: np.ndarray            # (shots,) bool: UF peeled every defect (True where UF not called)
     max_cluster: np.ndarray | None = None  # (shots,) int32 largest UF cluster (0 if UF not called)
+    table: np.ndarray | None = None        # (shots,) bool: answered by the single-fault table
+
+    @property
+    def table_fraction(self) -> float:
+        return float(self.table.mean()) if self.table is not None and self.table.size else 0.0
 
     @property
     def fast_fraction(self) -> float:
@@ -100,7 +107,7 @@ def _hier_batch(dets, K, partial, strict_r1,
                 nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
                 out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size,
-                correlated, cptr, cidx, clen, ccredit):
+                correlated, cptr, cidx, clen, ccredit, tkeys, tvals, out_table):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -123,6 +130,12 @@ def _hier_batch(dets, K, partial, strict_r1,
             out_lit[s] = c
             if c == 0:
                 out_fast[s] = True
+                continue
+            hit, tb = table_lookup(lits, c, tkeys, tvals)
+            if hit:  # exactly the syndrome of one DEM fault: its observable flip
+                out_bits[s] = tb
+                out_fast[s] = True
+                out_table[s] = True
                 continue
             if c > K:
                 b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
@@ -199,20 +212,25 @@ class Hierarchical:
         ok = np.ones(S, bool)
         lit_count = np.zeros(S, np.int32)
         size = np.zeros(S, np.int32)
+        table = np.zeros(S, bool)
+        use_table = self.config.table and g.fault_keys is not None
+        tkeys = g.fault_keys if use_table else np.zeros(0, np.uint64)
+        tvals = g.fault_obs if use_table else np.zeros(0, np.uint64)
         if backend == "numba":
             lt, ut = self.local.tables, self.uf.tables
             _hier_batch(dets, K, gate == "partial", self.config.strict_r1,
                         g.nbr, g.nbr_edge, lt.ball2, g.boundary_edge, lt.color, lt.n_colors,
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
                         g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size,
-                        self.config.uf.correlated, ut.corr_ptr, ut.corr_idx, ut.corr_len, ut.corr_credit)
+                        self.config.uf.correlated, ut.corr_ptr, ut.corr_idx, ut.corr_len, ut.corr_credit,
+                        tkeys, tvals, table)
         else:
-            bits, fast, uf_called, cleared, ok, size = self._run_reference(dets, K, gate)
+            bits, fast, uf_called, cleared, ok, size, table = self._run_reference(dets, K, gate, use_table)
             lit_count = dets.sum(axis=1, dtype=np.int32)
         return HierarchicalResult(bits_to_bool(bits, g.n_obs), fast, uf_called, lit_count, cleared, ok,
-                                  size)
+                                  size, table)
 
-    def _run_reference(self, dets, K, gate):
+    def _run_reference(self, dets, K, gate, use_table=False):
         g = self.graph
         loc = self.local.run(dets, K=K, record_residual=True, backend="reference")
         S = dets.shape[0]
@@ -223,6 +241,15 @@ class Hierarchical:
         cleared = sum(loc.cleared.values()).astype(np.int32)
         ok = np.ones(S, bool)
         size = np.zeros(S, np.int32)
+        table = np.zeros(S, bool)
+        if use_table:  # the table is consulted before the local rules
+            for s in range(S):
+                hit, tb = table_lookup_reference(g, dets[s])
+                if hit:
+                    table[s] = fast[s] = True
+                    uf_called[s] = False
+                    bits[s] = np.uint64(tb)
+                    cleared[s] = 0
         for s in np.flatnonzero(uf_called):
             row = loc.residual[s] if gate == "partial" else dets[s]
             st: dict = {}
@@ -231,7 +258,7 @@ class Hierarchical:
             bits[s] = (loc.obs_bits[s] ^ np.uint64(b)) if gate == "partial" else np.uint64(b)
             ok[s] = good
             size[s] = st["max_cluster"]
-        return bits, fast, uf_called, cleared, ok, size
+        return bits, fast, uf_called, cleared, ok, size, table
 
 
 class HierarchicalDecoder(Decoder):

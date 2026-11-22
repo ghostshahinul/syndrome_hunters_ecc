@@ -135,7 +135,9 @@ def test_fractions_and_counts_are_consistent(gate):
     res = Hierarchical(g, HierarchicalConfig(gate=gate)).run(dets)
     assert np.array_equal(res.fast, ~res.uf_called)
     assert (res.cleared <= res.lit_count).all()
-    assert (res.cleared[res.fast] == res.lit_count[res.fast]).all()
+    by_rules = res.fast & ~res.table  # fast path proper: the local rules cleared every event
+    assert (res.cleared[by_rules] == res.lit_count[by_rules]).all()
+    assert (res.cleared[res.table] == 0).all() and (res.lit_count[res.table] <= 4).all()
     assert 0.0 < res.fast_fraction <= 1.0
     assert 0.0 <= res.cleared_fraction <= 1.0
 
@@ -149,3 +151,38 @@ def test_config_validation():
 
 def test_registered():
     assert "hierarchical" in DECODERS and "hierarchical_partial" in DECODERS
+
+
+# ---- Phase C: single-fault table in Hierarchical -----------------------------------------
+@pytest.mark.parametrize("gate", GATES)
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5, 7)])
+def test_table_every_single_dem_fault_exact(tier, d, gate):
+    dem = tier_circuit(tier, d, TIER_P[tier]).detector_error_model(decompose_errors=True)
+    rows, truth = [], []
+    for inst in dem.flattened():
+        if inst.type != "error":
+            continue
+        r = np.zeros(dem.num_detectors, dtype=np.uint8)
+        o = np.zeros(dem.num_observables, dtype=bool)
+        for t in inst.targets_copy():
+            if t.is_relative_detector_id():
+                r[t.val] ^= 1
+            elif t.is_logical_observable_id():
+                o[t.val] ^= True
+        rows.append(r)
+        truth.append(o)
+    g = detector_graph(tier, d, TIER_P[tier])
+    res = Hierarchical(g, HierarchicalConfig(gate=gate)).run(np.array(rows))
+    np.testing.assert_array_equal(res.predictions, np.array(truth))
+    assert res.table.all()
+
+
+@pytest.mark.parametrize("gate", GATES)
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
+def test_table_numba_bit_identical(tier, d, gate):
+    g = detector_graph(tier, d, TIER_P[tier])
+    h = Hierarchical(g, HierarchicalConfig(gate=gate))
+    dets, _ = sample(tier, d, 300, seed=500 + d)
+    ref, fast = h.run(dets, backend="reference"), h.run(dets, backend="numba")
+    for f in ("predictions", "fast", "uf_called", "lit_count", "cleared", "ok", "max_cluster", "table"):
+        np.testing.assert_array_equal(getattr(fast, f), getattr(ref, f), err_msg=f)
