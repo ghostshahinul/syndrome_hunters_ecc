@@ -504,3 +504,64 @@ Item 2 commit: `0186f54` (merge; it also took in teammate deletions of old figur
   `thread_scaling_latest.png` and `cube_collapse_story_latest.png` (stamp 214318/214319).
 - The operating-point figure (single-thread since 20:37) and `ensemble_vs_M` (single-thread)
   already followed the rule.
+
+Item 3 commit: `bd86829` (pushed).
+
+## Item 4: best method as Hierarchical's deep tier (21:46 to 22:03)
+**Choice:** UF3D correlated (M=1) beats plain PyMatching at about 2× its speed. The correlated
+ensemble beats it by more, but at 20–25× the speed, outside PyMatching's range. So **correlated UF is now
+Hierarchical's default deep tier**: `HierarchicalConfig.uf = UnionFind3DConfig(correlated=True)`.
+- **Code:** the fused numba kernel gained a `_deep` helper that calls plain or correlated UF, with
+  correlated scratch per chunk. The reference uses `uf_correlated_shot_reference`. Hierarchical
+  numba equals the reference for both deep tiers × both gates × strict on/off × 3 tiers × d = 3/5.
+  `three_tier` (Hierarchical + MWPM) inherits the new deep tier.
+- **Defaults:** the operating point and `src.benchmark` add "UF3D correlated". The d=9 operating-point
+  test now also requires UF3D correlated to improve on d=7.
+- **Commit:** `76f9191` (code).
+
+**Operating-point run 22** (`results/operating_point/operating_point_run22.{csv,png}`): 5 × 50k = 250k shots,
+p = 0.5%, all single-thread.
+
+| d | PyMatching | Correlated PM | UnionFind3D | UF3D correlated | **Hierarchical** | H time ÷ PM time |
+|---|---|---|---|---|---|---|
+| 3 | 1.656% [1.607, 1.707] | 1.625% | 1.667% | 1.643% | 1.703% [1.653, 1.755] | 1.6× |
+| 5 | 1.383% [1.338, 1.429] | 1.076% | 1.523% | 1.226% | **1.227% [1.185, 1.271]** | 2.1× |
+| 7 | 1.035% [0.996, 1.075] | 0.609% | 1.222% | 0.835% | **0.835% [0.800, 0.871]** | 2.2× |
+| 9 | 0.670% [0.638, 0.702] | 0.299% | 0.846% | 0.496% | **0.496% [0.470, 0.525]** | 1.9× |
+
+**Verdict:**
+- **Hierarchical beats plain PyMatching's accuracy with non-overlapping 95% CIs at d = 5, 7 and 9.**
+  At d = 3 the CIs overlap.
+- **Speed:** 1.9–2.2× plain PyMatching's single-thread time, so it is *near* PyMatching's speed range
+  but not inside it. It runs in 0.65–0.8× of correlated PyMatching's time.
+- **Correlated PyMatching remains more accurate.**
+
+**Sweep rerun** (`results/sweep_20261121_215215.csv`; `accuracy_runtime_sweep_latest.png` and
+`fast_path_fraction_latest.png`, re-rendered at 215639 with a corrected footer):
+- At p = 0.5%: UF3D correlated / Hierarchical 0.783% vs PyMatching 1.019% at d=7, and 0.504%
+  vs 0.712% at d=9.
+- At p = 0.2%: d=7 15 vs 21 failures, d=9 3 vs 6. Those counts are small; more shots are needed
+  for CIs.
+
+**Docs:** the README has a new headline, sections 2.6 (correlated UF) and 2.7 (ensemble), story
+step 5, the latest results table, the honest caveats, and 2.5 updated for the new deep tier. The
+talk outline has a punchline, slide 7b (correlations) and updated slide-8 numbers.
+
+---
+
+## STATUS at 22:03 (items 1 to 4 done; hard stop 2:00 not reached)
+| Item | Result | Commit |
+|---|---|---|
+| 1. Correlated UF | beats plain PyMatching at d = 7/9 (non-overlapping CIs), 1.75–1.9× its time | `707cda6` (pushed via `bb47c78`) |
+| 2. Ensemble UF | correlated ensemble, M=8: beats plain PyMatching at d = 5/7/9 and matches correlated PyMatching's CI at d = 5/7, at 20–25× cost; plain ensemble doesn't help | `0186f54` |
+| 3. Fair speed reporting | single-thread-only figures and tables; parallelism reported separately (cores per shot, the PyMatching-processes caveat) | `bd86829` |
+| 4. Hierarchical with the correlated deep tier | beats plain PyMatching at d = 5/7/9 at 1.9–2.2× its time | `76f9191` + this commit |
+
+**Open items for you**
+1. **`src/__init__.py`** (deleted by PR #3): this breaks `pip install -e .` imports outside the repo
+   root. Restore it?
+2. **Superseded figures** were deleted by teammates; some `_latest` files were regenerated.
+3. **numba cache:** after editing `union_find.py` or `local.py`, clear `src/decoders/cube3d/__pycache__/*.nb*`.
+   Stale caches crash dependent kernels.
+4. **Possible next step to get *inside* PyMatching's speed:** run pass 2 only on the clusters that
+   changed. Today pass 2 redoes the whole shot.

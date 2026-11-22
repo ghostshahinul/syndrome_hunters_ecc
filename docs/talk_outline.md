@@ -23,8 +23,10 @@ each other.
   has to say whether the logical qubit flipped, faster than the hardware produces new rounds.
 - We're scored on accuracy (logical failure rate) and speed (µs per shot). The real test
   is whether the failure rate **falls as d grows**.
-- What we built: 6 decoders of our own (Cube-Collapse, Cube3D-Local, UnionFind3D,
-  Hierarchical, MWPM3D, Hierarchical + MWPM). PyMatching is used only as the yardstick.
+- What we built: 8 decoders of our own (Cube-Collapse, Cube3D-Local, UnionFind3D,
+  UF3D correlated, UF3D ensemble, Hierarchical, MWPM3D, Hierarchical + MWPM). PyMatching is
+  used only as the yardstick.
+- Punchline to set up: by the end our decoder beats plain PyMatching's accuracy at d = 5/7/9.
 
 ## 2. Whiteboard: repetition code and union-find (2:00)
 Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between neighbours,
@@ -96,10 +98,21 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
 - The local rules are parallel inside a shot as well: one color class at a time, all
   centers at once.
 
+## 7b. Correlations: how we beat plain PyMatching (fold into slide 8 if short on time)
+- A Y fault (or a hook) lights edges in *both* sublattices. Decoding each edge independently
+  ignores that. Stim's DEM tells us which edges come from one fault (the `^` components).
+- Two passes: UF once; make the DEM partners of the edges it used cheaper; UF again. Keep the
+  second answer only if it is cheaper under a correlated score (this guard fixed a real bug).
+- Figure `operating_point_run22.png`: at p=0.5%, d=9, 0.496% vs PyMatching's 0.670%
+  (non-overlapping CIs, 250k shots), at about 2× PyMatching's single-thread time.
+
 ## 8. Results and limits (1:15)
 - Show the full operating-point figure and the README results table.
-  - Accuracy: Hierarchical ≈ UF, 1.15× PyMatching at d=7, p=0.5% (target was ≤ 1.5×).
-  - Speed: single-thread, faster than PyMatching at d = 7 and 9 for p = 0.5%, slower for p ≤ 0.2%.
+  - Accuracy: with correlated UF as the deep tier, Hierarchical **beats plain PyMatching** at
+    d = 5/7/9 (d=7: 0.835% vs 1.035%; d=9: 0.496% vs 0.670%). Correlated PyMatching is still better.
+  - Speed, single thread vs single thread: 1.9–2.2× plain PyMatching, 0.65–0.8× correlated PyMatching.
+  - Ensemble of 8–12 correlated UF variants: within correlated PyMatching's CI at d = 5/7, but 20–25×
+    slower; it can spread one shot over 8 cores (58 µs at d=7).
 - Limits:
   - Union-find is not MWPM; the gap grows with d (1.29× at d=9).
   - The fast path only pays off when shots are sparse.

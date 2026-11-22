@@ -314,8 +314,9 @@ def plot_sweep(rows: list[dict], meta: dict | None = None):
     top = _legend(fig, [Line2D([], [], color=style_for(n).color, marker=style_for(n).marker, ms=8, lw=2,
                                label=n, mec=SURFACE) for n in decoders])
     note = f" {omitted} points with zero failures are not drawn." if omitted else ""
-    if {"UnionFind3D", "Hierarchical"} <= set(decoders):
-        note += " Where Hierarchical and UnionFind3D fail on exactly the same shots, the Hierarchical line hides UnionFind3D's."
+    if "Hierarchical" in decoders:
+        note += (" Hierarchical's deep tier is UF3D correlated; where the two fail on exactly the same"
+                 " shots, the Hierarchical line hides it.")
     _footer(fig, ["Lower is better; a steeper fall with d means more protection from a larger code. "
                   "Whiskers show 95% Wilson intervals." + note, machine_line(meta)])
     fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.12)

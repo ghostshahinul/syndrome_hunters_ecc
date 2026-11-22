@@ -4,14 +4,22 @@ Fast, parallel decoders for the rotated surface code, written from scratch and b
 against PyMatching (minimum-weight perfect matching) under circuit-level noise in Stim.
 MidQWest Northrop Grumman decoder challenge.
 
-**What's here:** six decoders of our own, all on Stim's detector error model:
+**Headline:** our **Hierarchical** decoder (local fast path, then **correlated two-pass
+union-find**) beats plain PyMatching's accuracy with non-overlapping 95% CIs at d = 5, 7 and 9
+under circuit-level noise at p = 0.5%. For example, at d=9: 0.496% [0.470, 0.525] vs
+0.670% [0.638, 0.702], 250k shots. Both decoders are single-threaded, and ours costs 1.9–2.2× PyMatching's time.
+Correlated PyMatching is still more accurate (0.299% at d=9, 2.7× PyMatching's time).
+
+**What's here:** eight decoders of our own, all on Stim's detector error model:
 
 | Decoder | Registry name | One line |
 |---|---|---|
 | Cube-Collapse | `cube_collapse` | flatten the time axis, then local Clique rules + greedy completion (2D) |
 | Cube3D-Local | (fast path, not standalone) | mutual-isolation rules R1–R3 on the 3D space-time graph |
 | UnionFind3D | `union_find_3d` | weighted Delfosse–Nickerson union-find + peeling on the 3D graph |
-| Hierarchical | `hierarchical`, `hierarchical_partial` | Cube3D-Local first, UnionFind3D only when needed |
+| UF3D correlated | `uf3d_correlated` | two-pass UF: pass 2 makes the DEM partners of pass-1 edges cheaper (Y / hook correlations) |
+| UF3D ensemble | `uf3d_ensemble` | M perturbed (correlated) UF variants per shot; the cheapest correction wins; parallel over variants |
+| Hierarchical | `hierarchical`, `hierarchical_partial` | Cube3D-Local first, UF3D correlated only when needed |
 | MWPM3D | `mwpm_3d` | our own exact minimum-weight perfect matching (Dijkstra + blossom), pure Python |
 | Hierarchical + MWPM | `hierarchical_mwpm` | three tiers: MWPM3D re-decodes shots where UF built a large cluster |
 
@@ -132,7 +140,9 @@ rotated memory experiment (d rounds plus the final data-readout layer).
 - **How it works:** a predecoder plus a global decoder, the layout surveyed in arXiv 2307.14989.
   Per shot:
   - lit = 0: no flip;
-  - lit > K: UnionFind3D;
+  - lit > K: the deep tier. Since item 4 this is **UF3D correlated** (section 2.6);
+    `HierarchicalConfig(uf=UnionFind3DConfig())` gives plain UF, the version measured in
+    the run-1 tables;
   - otherwise run the local rules. If every event is cleared, the fast-path answer stands.
     If not:
     - `gate="whole_shot"` (default): discard the local work and run UF on the whole shot;
@@ -142,7 +152,43 @@ rotated memory experiment (d rounds plus the final data-readout layer).
 - **Deviation:** the plan allowed either gate. We measured both, and the partial gate costs
   accuracy (section 5), so whole-shot is the default.
 
-### 2.6 MWPM3D and the three-tier decoder (`src/decoders/cube3d/mwpm.py`, `three_tier.py`)
+### 2.6 UF3D correlated, two passes (`union_find.py`, `UnionFind3DConfig(correlated=True)`)
+- **Correlation table:** the graph records which edge pairs come from one DEM error
+  instruction, i.e. components separated by `^`: the X and Z parts of a Y fault, or the two
+  halves of a hook error. Each pair gets its joint probability. At circuit-level d=7, 1,512 of
+  1,558 edges have partners.
+- **Pass 1:** plain UF.
+- **Pass 2:** every partner f of a pass-1 edge e gets the length of P(f|e) = P(e, f)/p_e,
+  clipped to [p_f, 0.5], for this shot only. Then UF runs again.
+- **Choosing the result:** pass 2's correction is kept only if its *correlated score* is
+  strictly lower. The score is Σ L_e minus, for every DEM partner pair inside the correction,
+  max(0, L_e + L_f − L_joint). Without this check, a pass-1 edge that was equivalent but
+  *different* pulled in its own partners and broke single faults.
+- **Cost and exactness:** about 2× UF's work, since UF runs twice; all lengths are integers;
+  numba is bit-identical to the Python reference.
+- **Single faults:** like correlated PyMatching (1 of 286), it is not exact on every single
+  fault. It mis-decodes 2 of the 286 circuit-level d=3 instructions (two three-component
+  hook faults, p = 3.3e-4), and is exact everywhere else we tested (up to 6,602
+  instructions at d=7).
+- **Compared with correlated PyMatching:** that works with full matching and its own
+  reweighting rule; ours is a cheaper heuristic on UF clusters.
+
+### 2.7 UF3D ensemble (`src/decoders/cube3d/ensemble.py`)
+- **How it works:**
+  - M variants per shot. Variant 0 is unperturbed; variant v uses weights w·exp(0.2·z_v), with
+    a fixed seed per variant, and odd variants grow smallest-first.
+  - Each variant runs (correlated) UF.
+  - The correction with the lowest score under the **original** weights wins.
+- **Parallelism:** numba `prange` over variants (one shot on up to M cores) or over shots.
+  Both are bit-identical to the reference.
+- **Results:**
+  - It improves accuracy steadily with M when correlated, and matches correlated
+    PyMatching's CI at d = 5/7.
+  - It costs 20–25× PyMatching single-thread at M=8, so it is an accuracy demonstration, not
+    a speed contender.
+  - The plain (non-correlated) ensemble did **not** help.
+
+### 2.8 MWPM3D and the three-tier decoder (`src/decoders/cube3d/mwpm.py`, `three_tier.py`)
 - **MWPM3D, our own exact matching:**
   - scipy Dijkstra from every lit detector over the 3D graph plus the boundary;
   - a matching graph with one boundary copy per detector, solved by `networkx.max_weight_matching`
@@ -175,6 +221,11 @@ the same sampled shots (seed 0) for every decoder at each (d, p).
 3. **Our own UF** (UnionFind3D) decodes everything, and its failure rate falls with d at every
    p ≤ 0.5% (`accuracy_runtime_sweep_latest.png`). It is 1.00–1.27× PyMatching at p = 0.5%.
 4. **Hierarchical**: the fast path takes the easy shots, and UF takes the rest.
+5. **Correlations**: decoding each sublattice independently throws away the fact that one Y or hook
+   fault lights edges in both. Correlated two-pass UF puts that information back, and as
+   Hierarchical's deep tier it **beats plain PyMatching** at d = 5/7/9
+   (`results/operating_point/operating_point_run22.png`). Accuracy in the sweep is in
+   `accuracy_runtime_sweep_latest.png`.
    - **Accuracy:** exactly UF's failures at d ≥ 5, within the CI at d=3.
    - **Speed:** 1.2–3.0× faster single-thread than UF on sparse shots.
    - **Scaling:** both scale over threads (`thread_scaling_latest.png`).
@@ -211,7 +262,32 @@ The figures in `results/plots/` (`*_latest.png`) come from benchmark run 1
 
 ## 5. Results
 
-### Headline numbers (benchmark run 1, commit `5e7b5ff`)
+### Latest: Hierarchical with correlated UF vs PyMatching (operating-point run 22, commit `76f9191`)
+p = 0.5%, circuit-level, rounds = d, 5 batches × 50,000 = 250,000 shots per point (seeds 0–4,
+the same for every decoder). **Every decoder single-thread**; time is the mean batch
+µs/shot, with the range across batches in brackets. Source:
+`results/operating_point/operating_point_run22.csv`.
+
+| d | PyMatching | Correlated PyMatching | UnionFind3D | UF3D correlated | **Hierarchical** |
+|---|---|---|---|---|---|
+| 3 | 1.656% [1.607, 1.707]; 0.51 µs | 1.625%; 1.39 µs | 1.667%; 0.75 µs | 1.643%; 1.93 µs | 1.703% [1.653, 1.755]; 0.81 µs |
+| 5 | 1.383% [1.338, 1.429]; 3.72 µs | 1.076% [1.036, 1.117]; 9.66 µs | 1.523%; 3.36 µs | 1.226%; 8.23 µs | **1.227% [1.185, 1.271]**; 7.74 µs |
+| 7 | 1.035% [0.996, 1.075]; 11.55 µs | 0.609% [0.579, 0.640]; 30.91 µs | 1.222%; 10.48 µs | 0.835%; 23.05 µs | **0.835% [0.800, 0.871]**; 24.98 µs |
+| 9 | 0.670% [0.638, 0.702]; 28.31 µs | 0.299% [0.278, 0.321]; 76.54 µs | 0.846%; 25.35 µs | 0.496%; 53.86 µs | **0.496% [0.470, 0.525]**; 54.62 µs |
+
+- **Beats plain PyMatching with non-overlapping CIs at d = 5, 7 and 9.** At d=3 the
+  CIs overlap: 1.703% vs 1.656%, where the fast path costs a little accuracy.
+- **Speed:** 1.9–2.2× plain PyMatching's single-thread time at d = 5–9, and 0.65–0.80× of
+  correlated PyMatching's.
+- **Not yet better than correlated PyMatching:** 0.835% vs 0.609% at d=7, 0.496% vs 0.299% at d=9.
+- **The more accurate ensemble** (correlated UF, M=8–12 variants) gets within correlated
+  PyMatching's CI at d = 5/7, but costs 20–25× PyMatching. See
+  `results/ensemble/ensemble_20261121_213502.csv` and `ensemble_vs_M_20261121_213502.png`.
+- **Timing caveat:** this machine was about 1.4× slower in this session than for the run-1 table
+  below, so compare µs only within one table.
+
+### Earlier: benchmark run 1, before correlations (commit `5e7b5ff`)
+
 
 Circuit-level p = 0.5%, rounds = d, 50,000 shots per point (seed 0, the same shots for every
 decoder). Source: `results/accuracy_runtime_20261121_202412.csv`, figure
@@ -298,6 +374,11 @@ MWPM time of the routed shots, per shot.
 - **At p ≤ 0.2%** there were too few failures in 20,000 shots (0–66 per point) to measure a gain.
 
 ### Honest limitations
+- **"Beats PyMatching" means plain PyMatching only.** Correlated PyMatching is still clearly
+  more accurate, and our speed is about 2× plain PyMatching, not equal to it. The ensemble closes
+  most of the accuracy gap to correlated PyMatching, but only at 20–25× the cost.
+- **Correlated UF loses 2 of 286 single faults at circuit d=3,** like correlated PyMatching
+  loses 1, so it is not a strict distance-preserving decoder on every fault at d=3.
 - **Union-find is not minimum-weight matching.** The gap to PyMatching grows with d: 1.27× at
   d=9, p=0.5%, and 1.83× at d=9, p=0.2% (11 vs 6 failures, so the ratio is noisy). Correlated
   PyMatching is better still (0.278% at d=9).
