@@ -429,7 +429,7 @@ MWPM time of the routed shots, per shot.
 | `test_cc_*.py` | Cube-Collapse stages: filter series, graph vs code-capacity DEM, Clique fixtures, completion, exhaustive low-weight errors |
 | `test_cube3d_mwpm.py` | MWPM3D decodes every single DEM component exactly, agrees with PyMatching (≤ 1% of shots may differ by ties), three-tier routing semantics (T = ∞ equals Hierarchical, T = 0 sends every UF shot to MWPM) |
 | `test_figures.py` | each figure function on a tiny synthetic CSV; never-overwrite; style registry unique |
-| `test_operating_point.py` | PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D and Hierarchical at p = 0.5%, d = 3/5/7/9, 3 batches × 50k shots (`--op-batches`, `--op-shots`). Writes `results/operating_point/operating_point_run<N>.png`. At d=9, every 3D decoder beats d=7 with non-overlapping CIs, and 2D-on-flat gets worse |
+| `test_operating_point.py` | PyMatching, Correlated PyMatching, UnionFind3D, UF3D correlated and Hierarchical at p = 0.5%, d = 3/5/7/9, 3 batches × 50k shots (`--op-batches`, `--op-shots`). Writes `results/operating_point/operating_point_run<N>.png`. At d=9, every 3D decoder beats d=7 with non-overlapping CIs |
 | `test_performance.py` | Stim stage timings and decoder µs/shot vs distance (recorded, loose bounds) |
 
 ---

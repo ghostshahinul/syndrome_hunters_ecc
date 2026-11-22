@@ -5,8 +5,8 @@ Circuit-level rotated Z memory, rounds = d, p = 0.5%, d = 3, 5, 7, 9.
 Each point: 3 independent batches of 50,000 shots (override with `pytest --op-batches B
 --op-shots N`); LER pooled over the batches, time = mean batch µs/shot with the fastest
 and slowest batch as horizontal whiskers. numba decoders run on 1 thread.
-Decoders: PyMatching, Correlated PyMatching, PyMatching 2D on Cube-Collapse's flat
-syndrome, UnionFind3D, UF3D correlated, Hierarchical (deep tier: UF3D correlated).
+Decoders: PyMatching, Correlated PyMatching, UnionFind3D, UF3D correlated, Hierarchical
+(deep tier: UF3D correlated). PyMatching 2D on flat is no longer in the default set.
 """
 
 import pytest
@@ -62,9 +62,3 @@ def test_distance_9_improves_on_distance_7(operating_points, decoder):
     ler = _ler(operating_points)
     d7, d9 = ler[(decoder, 7)], ler[(decoder, 9)]
     assert d9.ler_high < d7.ler_low, (decoder, d7.ler, d9.ler)
-
-
-def test_distance_9_flattening_gets_worse(operating_points):
-    """d = 9: matching on the flattened 2D syndrome keeps getting worse with distance."""
-    ler = _ler(operating_points)
-    assert ler[("PyMatching 2D on flat", 9)].ler_low > ler[("PyMatching 2D on flat", 7)].ler_high

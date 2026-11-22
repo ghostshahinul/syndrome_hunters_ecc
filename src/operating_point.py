@@ -5,12 +5,13 @@ seed, seed+1, ...). Every decoder decodes the same batches. Per decoder and dist
   - logical failure rate pooled over all batches (95% Wilson interval);
   - batch time per shot = one decode call over a batch / shots, averaged over the batches,
     with the fastest and slowest batch kept as a spread (decoder construction and warm-up
-    excluded).
+    excluded).  
 numba decoders (UnionFind3D, Hierarchical) run on `threads` threads (default 1, the fair
 comparison with single-threaded PyMatching). The machine fingerprint goes into every row.
 
-Default decoders: PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D,
-UF3D correlated, Hierarchical (whose deep tier is UF3D correlated). Cube-Collapse and Hierarchical (partial) can be added with --decoders.
+Default decoders: PyMatching, Correlated PyMatching, UnionFind3D, UF3D correlated,
+Hierarchical (whose deep tier is UF3D correlated). Cube-Collapse, PyMatching 2D on flat and
+Hierarchical (partial) can be added with --decoders.
 
 CLI:  python -m src.operating_point --distances 3 5 7 9 --p 0.005 --shots 50000 --batches 5
 Each run writes results/operating_point/operating_point_run<N>.csv and .png, with N
@@ -94,8 +95,8 @@ def implemented_registry_decoders() -> dict[str, Callable[[stim.DetectorErrorMod
     return out
 
 
-OPERATING_POINT_DECODERS = ("PyMatching", "Correlated PyMatching", "PyMatching 2D on flat",
-                            "UnionFind3D", "UF3D correlated", "Hierarchical")
+OPERATING_POINT_DECODERS = ("PyMatching", "Correlated PyMatching", "UnionFind3D", "UF3D correlated",
+                            "Hierarchical")
 
 
 def available_factories() -> dict[str, Callable[[stim.DetectorErrorModel], DecodeFn]]:
