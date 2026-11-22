@@ -84,3 +84,14 @@ def test_uncertainty_figure(tmp_path):
                                              ("Hierarchical", 12, 4.6))]
     path = plot_operating_point_uncertainty(pts, tmp_path / "unc.png", run_number=1)
     assert path.exists() and path.stat().st_size > 10_000
+
+
+def test_dark_figure_and_table(tmp_path):
+    from src.operating_point import OperatingPoint, markdown_table, plot_operating_point_dark
+    pts = [OperatingPoint(n, d, d, 0.005, 1000, k, k / 1000, (k - 4) / 1000, (k + 4) / 1000, t, 2, 500, t * 0.9, t * 1.1)
+           for d in (5, 7) for n, k, t in (("PyMatching", 14, 2.0), ("Hierarchical", 12, 4.6), ("FaultJoin", 13, 5.0))]
+    path = plot_operating_point_dark(pts, tmp_path / "dark.png", run_number=1)
+    assert path.exists() and path.stat().st_size > 10_000
+    table = markdown_table(pts)
+    assert table.splitlines()[0] == "| Decoder | d = 5 | d = 7 |"
+    assert "| FaultJoin | 1.300% [0.900, 1.700]; 5.00 µs |" in table

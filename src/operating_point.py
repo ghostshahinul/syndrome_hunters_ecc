@@ -147,7 +147,8 @@ class OperatingPoint:
     git_commit: str = ""
 
 
-NUMBA_DECODERS = {"UnionFind3D", "UF3D correlated", "UF3D ensemble", "Hierarchical", "Hierarchical (partial)"}
+NUMBA_DECODERS = {"UnionFind3D", "UF3D correlated", "UF3D ensemble", "Hierarchical", "Hierarchical (partial)",
+                  "FaultJoin"}
 
 
 def measure(distances=(3, 5, 7, 9), p: float = 0.005, shots: int = 50_000, seed: int = 0,
@@ -348,6 +349,85 @@ def plot_operating_point_uncertainty(rows: list[OperatingPoint], path: Path, run
     fig.savefig(path, dpi=150, facecolor=SURFACE)
     plt.close(fig)
     return path
+
+
+DARK = {"bg": "#0f1115", "panel": "#161a21", "ink": "#f2f2f0", "ink2": "#b9bcc4", "grid": "#2a303b",
+        "axis": "#4a5160"}
+DARK_COLORS = {"PyMatching": "#ff8a4c", "Correlated PyMatching": "#3ddc97", "UnionFind3D": "#f49ac1",
+               "UF3D correlated": "#c77dff", "Hierarchical": "#4ea8ff", "FaultJoin": "#ffd166"}
+
+
+def plot_operating_point_dark(rows: list[OperatingPoint], path: Path, run_number: int | None = None,
+                              title: str = "Every team decoder on the same shots") -> Path:
+    """Dark-theme slide version of the operating-point figure: same data and layout (x = batch
+    time per shot, y = failure %, 95% Wilson whiskers, batch-spread x whiskers), larger type."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    decoders = list(dict.fromkeys(r.decoder for r in rows))
+    distances = sorted({r.distance for r in rows})
+    first = rows[0]
+    fig, axes = plt.subplots(1, len(distances), figsize=(5.8 * len(distances), 7.4), sharey=True,
+                             facecolor=DARK["bg"], squeeze=False)
+    axes = axes[0]
+    for ax, d in zip(axes, distances):
+        ax.set_facecolor(DARK["panel"])
+        pts = [r for r in rows if r.distance == d]
+        for r in pts:
+            color = DARK_COLORS.get(r.decoder, DARK["ink2"])
+            y = 100 * r.ler
+            xerr = [[r.us_per_shot - r.us_min], [r.us_max - r.us_per_shot]] if r.batches > 1 else None
+            big = r.decoder == "Hierarchical"
+            ax.errorbar(r.us_per_shot, y, yerr=[[y - 100 * r.ler_low], [100 * r.ler_high - y]], xerr=xerr,
+                        fmt=style_for(r.decoder).marker, color=color, ms=14 if big else 11, mec=DARK["panel"],
+                        mew=1.5, elinewidth=2.2, capsize=5, capthick=2.2, zorder=4 if big else 3)
+        ax.set_title(f"Distance {d}", fontsize=20, color=DARK["ink"], pad=12)
+        ax.set_xlim(0, max(max(r.us_per_shot, r.us_max) for r in pts) * 1.12)
+        ax.set_xlabel("Batch time per shot (µs)", fontsize=17, color=DARK["ink2"])
+        ax.grid(True, color=DARK["grid"], lw=0.9, zorder=0)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(DARK["axis"])
+        ax.tick_params(colors=DARK["ink2"], labelsize=14, length=5, color=DARK["axis"])
+    axes[0].set_ylabel("Logical failures per shot (%)", fontsize=17, color=DARK["ink2"])
+    fig.text(0.045, 0.975, title, fontsize=28, fontweight="bold", color=DARK["ink"], va="top")
+    run_label = f"  ·  run {run_number}" if run_number is not None else ""
+    fig.text(0.045, 0.905, f"Rotated Z memory  ·  circuit-level p = {100 * first.p:.1f}%  ·  rounds = d  ·  "
+             f"{first.batches} × {first.shots_per_batch:,} shots per point, the same shots for every decoder  ·  "
+             f"single thread{run_label}", fontsize=15, color=DARK["ink2"], va="top")
+    handles = [Line2D([], [], color=DARK_COLORS.get(n, DARK["ink2"]), marker=style_for(n).marker, ms=12, lw=0,
+                      mec=DARK["panel"], label=n) for n in decoders]
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.04, 0.855), ncol=len(handles), frameon=False,
+               fontsize=16, handletextpad=0.4, columnspacing=1.8, labelcolor=DARK["ink"])
+    meta = {"cpu": first.cpu or None, "power": first.power, "git_commit": first.git_commit,
+            "threads_note": "every decoder single-thread (PyMatching too)"}
+    fig.text(0.045, 0.02, "Lower and further left is better. Whiskers: 95% Wilson interval (vertical), fastest–slowest "
+             "batch (horizontal). FaultJoin is a teammate decoder (branch shahi_2).\n" + machine_line(meta),
+             fontsize=12.5, color=DARK["ink2"], linespacing=1.5)
+    fig.subplots_adjust(left=0.06, right=0.985, top=0.71, bottom=0.2, wspace=0.12)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, facecolor=DARK["bg"])
+    plt.close(fig)
+    return path
+
+
+def markdown_table(rows: list[OperatingPoint]) -> str:
+    """LER [95% CI] and batch µs/shot per decoder (rows) and distance (columns)."""
+    decoders = list(dict.fromkeys(r.decoder for r in rows))
+    distances = sorted({r.distance for r in rows})
+    at = {(r.decoder, r.distance): r for r in rows}
+    out = ["| Decoder | " + " | ".join(f"d = {d}" for d in distances) + " |", "|---|" + "---|" * len(distances)]
+    for n in decoders:
+        cells = []
+        for d in distances:
+            r = at.get((n, d))
+            cells.append("–" if r is None else f"{100 * r.ler:.3f}% [{100 * r.ler_low:.3f}, {100 * r.ler_high:.3f}]; "
+                         f"{r.us_per_shot:.2f} µs")
+        out.append(f"| {n} | " + " | ".join(cells) + " |")
+    return "\n".join(out)
 
 
 def write_csv(rows: list[OperatingPoint], path: Path) -> Path:
