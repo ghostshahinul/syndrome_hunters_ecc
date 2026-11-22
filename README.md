@@ -6,9 +6,10 @@ MidQWest Northrop Grumman decoder challenge.
 
 **Headline:** our **Hierarchical** decoder (local fast path, then **correlated two-pass
 union-find**) beats plain PyMatching's accuracy with non-overlapping 95% CIs at d = 5, 7 and 9
-under circuit-level noise at p = 0.5%. For example, at d=9: 0.496% [0.470, 0.525] vs
-0.670% [0.638, 0.702], 250k shots. Both decoders are single-threaded, and ours costs 1.9–2.2× PyMatching's time.
-Correlated PyMatching is still more accurate (0.299% at d=9, 2.7× PyMatching's time).
+under circuit-level noise at p = 0.5%. At d=9, for example: 0.496% [0.470, 0.525] vs 0.670%
+[0.638, 0.702], 250k shots. Single thread vs single thread, it costs 1.9–2.4× PyMatching's time
+(2.07× at d=7, 1.92× at d=9): **not yet inside PyMatching's speed**. Correlated PyMatching is
+still more accurate (0.299% at d=9) and 2.7× PyMatching's time.
 
 **What's here:** eight decoders of our own, all on Stim's detector error model:
 
@@ -262,29 +263,38 @@ The figures in `results/plots/` (`*_latest.png`) come from benchmark run 1
 
 ## 5. Results
 
-### Latest: Hierarchical with correlated UF vs PyMatching (operating-point run 22, commit `76f9191`)
+### Latest: Hierarchical with correlated UF vs PyMatching (operating-point run 31, commit `313deb4`)
 p = 0.5%, circuit-level, rounds = d, 5 batches × 50,000 = 250,000 shots per point (seeds 0–4,
-the same for every decoder). **Every decoder single-thread**; time is the mean batch
-µs/shot, with the range across batches in brackets. Source:
-`results/operating_point/operating_point_run22.csv`.
+the same for every decoder). **Every decoder single-thread** (Windows "Best performance" power
+mode, numba cache cleared and warmed up); time is the mean batch µs/shot. Source:
+`results/operating_point/operating_point_run31.csv` and `operating_point_run31.png`.
 
-| d | PyMatching | Correlated PyMatching | UnionFind3D | UF3D correlated | **Hierarchical** |
-|---|---|---|---|---|---|
-| 3 | 1.656% [1.607, 1.707]; 0.51 µs | 1.625%; 1.39 µs | 1.667%; 0.75 µs | 1.643%; 1.93 µs | 1.703% [1.653, 1.755]; 0.81 µs |
-| 5 | 1.383% [1.338, 1.429]; 3.72 µs | 1.076% [1.036, 1.117]; 9.66 µs | 1.523%; 3.36 µs | 1.226%; 8.23 µs | **1.227% [1.185, 1.271]**; 7.74 µs |
-| 7 | 1.035% [0.996, 1.075]; 11.55 µs | 0.609% [0.579, 0.640]; 30.91 µs | 1.222%; 10.48 µs | 0.835%; 23.05 µs | **0.835% [0.800, 0.871]**; 24.98 µs |
-| 9 | 0.670% [0.638, 0.702]; 28.31 µs | 0.299% [0.278, 0.321]; 76.54 µs | 0.846%; 25.35 µs | 0.496%; 53.86 µs | **0.496% [0.470, 0.525]**; 54.62 µs |
+| d | PyMatching | Correlated PyMatching | UnionFind3D | UF3D correlated | **Hierarchical** | Hierarchical ÷ PM time |
+|---|---|---|---|---|---|---|
+| 3 | 1.656% [1.607, 1.707]; 0.31 µs | 1.625%; 0.86 µs | 1.667%; 0.57 µs | 1.608%; 0.86 µs | 1.703% [1.653, 1.755]; 0.51 µs | 1.65× |
+| 5 | 1.383% [1.338, 1.429]; 2.36 µs | 1.076% [1.036, 1.117]; 6.77 µs | 1.523%; 2.56 µs | 1.226%; 5.79 µs | **1.227% [1.185, 1.271]**; 5.64 µs | 2.39× |
+| 7 | 1.035% [0.996, 1.075]; 8.07 µs | 0.609% [0.579, 0.640]; 22.07 µs | 1.222%; 7.56 µs | 0.835%; 16.54 µs | **0.835% [0.800, 0.871]**; 16.70 µs | 2.07× |
+| 9 | 0.670% [0.638, 0.702]; 19.58 µs | 0.299% [0.278, 0.321]; 52.06 µs | 0.846%; 17.63 µs | 0.496%; 37.75 µs | **0.496% [0.470, 0.525]**; 37.66 µs | 1.92× |
 
-- **Beats plain PyMatching with non-overlapping CIs at d = 5, 7 and 9.** At d=3 the
-  CIs overlap: 1.703% vs 1.656%, where the fast path costs a little accuracy.
-- **Speed:** 1.9–2.2× plain PyMatching's single-thread time at d = 5–9, and 0.65–0.80× of
-  correlated PyMatching's.
-- **Not yet better than correlated PyMatching:** 0.835% vs 0.609% at d=7, 0.496% vs 0.299% at d=9.
-- **The more accurate ensemble** (correlated UF, M=8–12 variants) gets within correlated
-  PyMatching's CI at d = 5/7, but costs 20–25× PyMatching. See
-  `results/ensemble/ensemble_20261121_213502.csv` and `ensemble_vs_M_20261121_213502.png`.
-- **Timing caveat:** this machine was about 1.4× slower in this session than for the run-1 table
-  below, so compare µs only within one table.
+- **Accuracy target met:** Hierarchical beats plain PyMatching with non-overlapping 95% CIs
+  at d = 5, 7 and 9. At d=3 the CIs overlap (1.703% vs 1.656%).
+- **Speed target (≤ 1.0× plain PyMatching single-thread at d = 7/9) not met:** 2.07× and
+  1.92×. Hierarchical is 0.72–0.76× of correlated PyMatching's time.
+- **Why:** correlated UF is two full UF passes; plain UF alone is 0.90–0.94× PyMatching.
+  The overnight optimization round (`docs/PROGRESS.md`, Phases A to E7) found no exact or
+  approximate way to halve that:
+  - skip-ahead growth, sparse scans and cluster-local pass 2 were all slower;
+  - online single-pass correlation lost accuracy;
+  - the accuracy options all cost time.
+- **Accurate options** (off by default, measured at 250k shots):
+  - **`weighted_forest`:** −5–7% LER for +18–20% time;
+  - **`scale=8`:** −7–9% LER for +27–35% time;
+  - **the correlated ensemble with M=8–12:** within correlated PyMatching's CI at d = 5/7, but at 20–25× the time.
+- **Single-fault table:** every single DEM fault now decodes exactly. 39% of d=3 shots and 6% of
+  d=5 shots are answered by table lookup.
+- **Multi-core** (reported separately, not a race): Hierarchical at d=9 goes from 38.0 µs on 1
+  thread to 6.5 µs on 12 threads (5.8×) (`thread_scaling_latest.png`). PyMatching can be
+  parallelized across processes the same way.
 
 ### Earlier: benchmark run 1, before correlations (commit `5e7b5ff`)
 

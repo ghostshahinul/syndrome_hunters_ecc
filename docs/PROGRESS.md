@@ -768,3 +768,67 @@ as its deep tier). The defaults are off, so the golden outputs are unchanged.
 **Outcome:** none of the accuracy options is adopted as a default. **Every** accuracy gain costs
 time, and time is the binding constraint for the ≤ 1.0× target. The accurate variants (E2, E3 S=8,
 or both) remain available as options. Correlated UF itself is still 1.96–2.08× PyMatching at d = 7/9.
+
+Phase E commit: `313deb4` (pushed).
+
+## Extra E7, not in the plan: single-pass "online" correlated UF (01:02 to 01:05). Failed.
+- **Idea:** when an edge finishes growing in pass 1, give its DEM partners the conditional length
+  immediately, with no second pass (cost ≈ one UF pass).
+- **Prototype:** in a scratch copy of the kernel (not committed); 50k shots, p = 0.5%, 1 thread:
+  - **O1 (online, single pass):** 2.800% / 2.580% / 2.202% LER at d = 5/7/9, worse than *plain*
+    UF (1.498 / 1.166 / 0.876%), at 3.85 / 12.22 / 29.52 µs.
+  - **O2 (online pass 1 + the usual pass 2):** 1.402 / 0.976 / 0.534%, also slower (7.24 / 22.26 / 52.54 µs)
+    than two-pass correlated UF (1.260 / 0.828 / 0.512% at 6.01 / 17.09 / 39.68 µs).
+- **Why it fails:** grown edges include the whole interior of each cluster, not just the
+  correction, so online reweighting shortens far too many partners. Dropped.
+
+## Phase F: final numbers and figures (01:06 to 01:15)
+**Defaults** (unchanged by Phases B to E except the table):
+- Hierarchical, whole-shot gate, K = 6;
+- deep tier = correlated two-pass UF, S = 4;
+- single-fault table on;
+- the B/E options all off.
+
+**Operating-point run 31** (`results/operating_point/operating_point_run31.{csv,png}`): 5 × 50k = 250k shots,
+p = 0.5%, single thread, numba cache cleared, Best-performance power mode, commit `313deb4`.
+
+| d | PyMatching | Correlated PM | UnionFind3D | UF3D correlated | **Hierarchical** | H ÷ PM |
+|---|---|---|---|---|---|---|
+| 3 | 1.656% · 0.31 µs | 1.625% · 0.86 | 1.667% · 0.57 | 1.608% · 0.86 | 1.703% [1.653, 1.755] · 0.51 | 1.65× |
+| 5 | 1.383% [1.338, 1.429] · 2.36 | 1.076% · 6.77 | 1.523% · 2.56 | 1.226% · 5.79 | **1.227% [1.185, 1.271]** · 5.64 | 2.39× |
+| 7 | 1.035% [0.996, 1.075] · 8.07 | 0.609% · 22.07 | 1.222% · 7.56 | 0.835% · 16.54 | **0.835% [0.800, 0.871]** · 16.70 | 2.07× |
+| 9 | 0.670% [0.638, 0.702] · 19.58 | 0.299% · 52.06 | 0.846% · 17.63 | 0.496% · 37.75 | **0.496% [0.470, 0.525]** · 37.66 | 1.92× |
+
+**Benchmark run 2** (`python -m src.benchmark`, stamp `20261122_010751`) regenerated:
+- `accuracy_runtime`, `cube_collapse_story`, `accuracy_runtime_sweep`, `fast_path_fraction`
+  and `thread_scaling` (`_latest`);
+- `mwpm_tier_p0_5` and `ensemble_vs_M`, re-rendered from their CSVs.
+
+**Thread scaling** (d=9, Hierarchical): 38.0 µs on 1 thread → 6.52 on 12 threads (5.8×).
+
+### TARGETS
+- **Speed, ≤ 1.0× plain PyMatching single-thread at d = 7/9: NOT MET.** Hierarchical is 2.07× (d=7)
+  and 1.92× (d=9). Plain UF alone is 0.90–0.94× PyMatching, but the correlated deep tier is two full
+  UF passes, and nothing tried tonight halved that.
+- **Accuracy, non-overlapping 95% CIs vs plain PyMatching at d = 5/7/9: MET.**
+
+### Status of the optimization round
+| Phase | Outcome | Commit |
+|---|---|---|
+| A measure | time split + per-shot counters; golden outputs saved | `7a62911` |
+| B exact speedups | no net gain (skip-ahead per-round overhead > saved rounds); kept the lits interface + `skip_ahead` option | `dd31a12` |
+| C single-fault table | every single fault exact; 39% / 6% of shots at d = 3/5; no LER change at d ≥ 5 | `406f75a` |
+| D cluster-local pass 2 | slower (radius 0: +3–12%, radius 1: +45–55%); reverted | `4887ecf` |
+| E accuracy options | weighted forest −5–7% LER / +18–20% time; S=8 −7–9% / +27–35%; pass 3 −2–4% / +20–27%; float score ≈ 0; partial gate worse; K no effect at d ≥ 7; M=2/3 too slow; none adopted | `313deb4` |
+| E7 online correlation | failed (worse than plain UF); not committed | — |
+| F final numbers + docs | operating point run 31, benchmark run 2, README / talk / PROGRESS | this commit |
+
+**For you to check or decide**
+1. **Speed vs accuracy:** if you'd rather show more accuracy at the same "about 2× PyMatching" story,
+   `UnionFind3DConfig(correlated=True, scale=8)` or `weighted_forest=True` is measured and ready (see Phase E).
+2. **Power mode:** set to "Best performance" for the timing runs and restored to "Balanced" at the end
+   of this session (`powercfg /overlaysetactive 00000000-0000-0000-0000-000000000000`).
+3. **Speed ideas I did not try tonight** (each a real engineering job):
+   - per-cluster frontier lists in the growth loop (today every round scans all visited nodes);
+   - reusing pass 1's grown supports to warm-start pass 2;
+   - a cheaper pass-1/pass-2 split on large clusters only.
