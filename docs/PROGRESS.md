@@ -240,3 +240,24 @@ discord" at 20:15; I left that commit as it is.
 - **Check before the talk:** I describe arXiv 2307.14989 only as the source of the
   predecoder + global-decoder layout. I didn't re-read the paper tonight, so please check that
   wording.
+
+Milestones 3+4 commit: `51d341e`.
+
+---
+
+## [ASK] Milestone 5: A or B? (logged 20:31; defaulting to B at 20:41 unless you answer)
+
+Both options are feasible: gcc is at `C:\msys64\ucrt64\bin\gcc.exe`, and networkx 3.7 is
+already in the venv.
+
+**My recommendation: B (our own MWPM tier for the hardest shots).**
+- **Judging: number of algorithms and novelty.** B adds a fifth algorithm and a third tier
+  (local → UF → MWPM). A adds a backend for an algorithm we already have.
+- **It targets our main limitation,** the accuracy gap: UF is 1.27× PyMatching at d=9 p=0.5%.
+  A doesn't change accuracy.
+- **Parallelism is already shown:** numba gives 6.7–7.1× at 12 threads. A C/OpenMP port would
+  probably buy a constant factor of 1–2× single-thread at best, with the same scaling story.
+- **Risk:** `networkx.max_weight_matching` is pure Python, about milliseconds per shot. B only pays
+  off if the trigger (UF cluster size or count) sends a small fraction of shots (≲1%) to MWPM
+  *and* those shots hold a good share of UF's failures. I'll measure both and report honestly,
+  including if the trigger turns out not to find UF's mistakes.
