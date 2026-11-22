@@ -21,6 +21,10 @@ STYLES = {
     "fault_join": ("FaultJoin", "#006e67", "o"),
     "pymatching": ("PyMatching", "#4368a9", "s"),
     "pymatching_correlated": ("Correlated PyMatching", "#a94e16", "^"),
+    "ising_pymatching": ("Ising + PyMatching", "#ae3860", "P"),
+    "ising_pymatching_correlated": ("Ising + correlated PyMatching", "#247f91", "X"),
+    "ising_boundary_correlated": ("Ising + boundary restoration", "#664999", "v"),
+    "ising_boundary_table": ("Compiled boundary Ising", "#864032", "h"),
     "union_find": ("Weighted union–find", "#795789", "D"),
 }
 DISTANCE_COLORS = ["#206493", "#bd581b", "#178062", "#84529a", "#614839"]
@@ -38,7 +42,8 @@ def load_rows(paths: list[Path]) -> list[dict]:
                 for k in ("p", "logical_error_rate", "us_per_shot"):
                     row[k] = float(row[k])
                 row["ler_low95"], row["ler_high95"] = wilson(row["num_errors"], row["shots"])
-                for k in ("single_p50_us", "single_p95_us"):
+                for k in ("single_p50_us", "single_p95_us", "density_before", "density_after", "events_removed_pct",
+                          "table_build_s"):
                     row[k] = float(row[k]) if row.get(k) else None
                 key = row["decoder"], row["distance"], row["p"]
                 if key in seen:
@@ -47,6 +52,14 @@ def load_rows(paths: list[Path]) -> list[dict]:
                 rows.append(row)
     if not rows or len({r["basis"] for r in rows}) != 1:
         raise ValueError("supply results for one memory basis per figure set")
+    if len({r.get("source") or "stim" for r in rows}) != 1:
+        raise ValueError("supply one circuit and noise family per figure set")
+    identities = {}
+    for r in rows:
+        key = (r["distance"], r["rounds"], r["p"])
+        sample_id = r.get("sample_sha256")
+        if sample_id and identities.setdefault(key, sample_id) != sample_id:
+            raise ValueError(f"decoders at {key} used different samples")
     rounds = {r["rounds"] for r in rows}
     if len(rounds) > 1 and not all(r["rounds"] == r["distance"] for r in rows):
         raise ValueError("select either fixed rounds or rounds equal to distance")
@@ -60,8 +73,9 @@ def _style(name):
 def _legend(fig, items):
     handles = [Line2D([], [], color=color, marker=marker, lw=2, markersize=6, label=name)
                for name, color, marker in items]
+    columns = 4 if fig.get_figwidth() >= 15 else 3
     fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.055, 0.855),
-               frameon=False, ncol=min(4, len(items)), columnspacing=1.8, handlelength=1.65)
+               frameon=False, ncol=columns if len(items) > 4 else len(items), columnspacing=1.5, handlelength=1.55)
 
 
 def _header(fig, rows, title, detail):
@@ -71,7 +85,8 @@ def _header(fig, rows, title, detail):
     counts = {r["shots"] for r in rows}
     shots = f"{counts.pop():,} shots per point" if len(counts) == 1 else "shot counts in CSV"
     fig.text(.06, .955, title, fontsize=20, weight="bold", color="#172d39", va="top")
-    fig.text(.06, .89, f"Rotated {basis} memory  ·  {rounds}  ·  {shots}  ·  {detail}",
+    source = "NVIDIA XV" if rows[0].get("source") == "nvidia" else "Rotated"
+    fig.text(.06, .89, f"{source} {basis} memory  ·  {rounds}  ·  {shots}  ·  {detail}",
              fontsize=10.5, color="#435864", va="top")
 
 
@@ -131,7 +146,7 @@ def plot_threshold(rows: list[dict], out_dir: Path = FIGURES_DIR) -> list[Path]:
         _axes(ax)
     for ax in list(axes.flat)[len(names):]:
         ax.set_visible(False)
-    fig.supxlabel("Physical error probability per noise channel (%)", y=.077, fontsize=11)
+    fig.supxlabel("Physical noise parameter p (%)", y=.077, fontsize=11)
     fig.supylabel("Logical failures per memory experiment (%)", x=.013, fontsize=11)
     note = ("Hollow downward triangles mark the 95% upper endpoint when zero failures were observed."
             if any(r["num_errors"] == 0 for r in rows)
@@ -152,8 +167,8 @@ def plot_latency(rows: list[dict], out_dir: Path = FIGURES_DIR, p=None) -> Path:
     pts, p = _point(rows, p)
     names = list(dict.fromkeys(r["decoder"] for r in pts))
     single = all(r["single_p50_us"] is not None for r in pts)
-    fig, axes = plt.subplots(1, 1 + int(single), figsize=(12, 5.7), squeeze=False)
-    fig.subplots_adjust(left=.08, right=.97, top=.70, bottom=.20, wspace=.27)
+    fig, axes = plt.subplots(1, 1 + int(single), figsize=(12, 7 if len(names) > 6 else 5.7), squeeze=False)
+    fig.subplots_adjust(left=.08, right=.97, top=.64 if len(names) > 6 else .70, bottom=.20, wspace=.27)
     _header(fig, pts, "How decoding time scales with distance", f"physical error {p:.2%}")
     _legend(fig, [_style(n) for n in names])
     for i, ax in enumerate(axes.flat):
@@ -180,6 +195,73 @@ def plot_latency(rows: list[dict], out_dir: Path = FIGURES_DIR, p=None) -> Path:
                  if single else "Batch points show amortized time per shot.")
 
 
+def plot_distance(rows, out_dir=FIGURES_DIR, p=None):
+    pts, p = _point(rows, p)
+    names = list(dict.fromkeys(r["decoder"] for r in pts))
+    fig, ax = plt.subplots(figsize=(12 if len(names) > 4 else 10.5, 7 if len(names) > 6 else 6))
+    fig.subplots_adjust(left=.12, right=.96, top=.64 if len(names) > 6 else .68, bottom=.20)
+    _header(fig, pts, "Logical failure rate by code distance", f"physical noise p = {p:.2%}")
+    _legend(fig, [_style(n) for n in names])
+    for index, name in enumerate(names):
+        series = sorted((r for r in pts if r["decoder"] == name), key=lambda r: r["distance"])
+        _, color, marker = _style(name)
+        x = np.array([r["distance"] for r in series], dtype=float)
+        if len(names) > 4:
+            x += .045 * (index - (len(names) - 1) / 2)
+        _accuracy_points(ax, series, x, color, marker)
+    ax.set(xlabel="Code distance", ylabel="Logical failures (%)", yscale="log",
+           xticks=sorted({r["distance"] for r in pts}))
+    ax.yaxis.set_major_locator(LogLocator(base=10, subs=[1, 2, 3, 5]))
+    ax.yaxis.set_major_formatter(PLAIN)
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    _axes(ax)
+    note = "Whiskers show 95% Wilson intervals."
+    if len(names) > 4:
+        note += " Points are offset within each distance to show overlapping intervals."
+    if any(r["num_errors"] == 0 for r in pts):
+        note += " Hollow downward triangles mark upper limits for zero failures."
+    return _save(fig, out_dir, "logical_error_by_distance.png", note)
+
+
+def plot_density(rows, out_dir=FIGURES_DIR, p=None):
+    pts, p = _point(rows, p)
+    measured = [r for r in pts if r.get("density_after") is not None]
+    if not measured:
+        return None
+    series_by_name = {name: sorted((r for r in measured if r["decoder"] == name), key=lambda r: r["distance"])
+                      for name in dict.fromkeys(r["decoder"] for r in measured)}
+    fig, (density, reduction) = plt.subplots(1, 2, figsize=(12, 6.2))
+    fig.subplots_adjust(left=.08, right=.97, top=.68, bottom=.20, wspace=.29)
+    _header(fig, measured, "How many detector events does Ising remove?", f"physical noise p = {p:.2%}")
+    items = [("Original detector samples", "#354852", "o")]
+    first = next(iter(series_by_name.values()))
+    density.plot([r["distance"] for r in first], [100*r["density_before"] for r in first],
+                 color="#354852", marker="o", ls="--")
+    def counts(series):
+        return [(r["distance"], r["density_after"]) for r in series]
+    standard = series_by_name.get("ising_pymatching", [])
+    correlated = series_by_name.get("ising_pymatching_correlated", [])
+    shared = standard and correlated and counts(standard) == counts(correlated)
+    for name, series in series_by_name.items():
+        if shared and name == "ising_pymatching_correlated":
+            continue
+        label, color, marker = _style(name)
+        if shared and name == "ising_pymatching":
+            label = "Published Ising residual (both matchers)"
+        items.append((label, color, marker))
+        x = [r["distance"] for r in series]
+        density.plot(x, [100*r["density_after"] for r in series], color=color, marker=marker)
+        reduction.plot(x, [r["events_removed_pct"] for r in series], color=color, marker=marker)
+    _legend(fig, items)
+    density.set(ylabel="Detector bits set (%)", ylim=(0, None))
+    reduction.set_ylabel("Original events removed, net (%)")
+    for ax in (density, reduction):
+        ax.set(xlabel="Code distance", xticks=sorted({r["distance"] for r in measured}))
+        _axes(ax)
+    return _save(fig, out_dir, "syndrome_density.png",
+                 "Each density uses all detector bits across all shots. Residuals are measured before matching.")
+
+
 def plot_tradeoff(rows, out_dir=FIGURES_DIR, p=None):
     pts, p = _point(rows, p)
     names = list(dict.fromkeys(r["decoder"] for r in pts))
@@ -194,15 +276,25 @@ def plot_tradeoff(rows, out_dir=FIGURES_DIR, p=None):
             if r["distance"] == d:
                 _, color, marker = _style(r["decoder"])
                 _accuracy_points(ax, [r], [r["us_per_shot"]], color, marker, connect=False)
-        max_time = max(r["us_per_shot"] for r in pts if r["distance"] == d)
-        ax.set(title=f"Distance {d}", xlim=(0, max_time * 1.13))
+        times = [r["us_per_shot"] for r in pts if r["distance"] == d]
+        ax.set_title(f"Distance {d}")
         ax.set_xlabel("Batch time per shot (µs)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=3))
+        if max(times) / min(times) >= 20:
+            ax.set_xscale("log")
+            ax.set_xlim(min(times) * .75, max(times) * 1.3)
+            ticks = [1, 2, 5] if max(times) / min(times) < 80 else [1]
+            ax.xaxis.set_major_locator(LogLocator(base=10, subs=ticks))
+            ax.xaxis.set_minor_formatter(NullFormatter())
+        else:
+            ax.set_xlim(0, max(times) * 1.13)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=3))
         ax.xaxis.set_major_formatter(PLAIN)
         _axes(ax)
     axes.flat[0].set_ylabel("Logical failures (%)")
-    return _save(fig, out_dir, "accuracy_runtime.png",
-                 "Lower and further left is better. Whiskers show 95% Wilson intervals for the failure rate.")
+    builds = [r["table_build_s"] for r in pts if r.get("table_build_s") is not None]
+    note = (f"Table compilation took {builds[0]:.1f} s before the warmed runs. " if len(builds) == 1
+            else "Lower and further left is better. ")
+    return _save(fig, out_dir, "accuracy_runtime.png", note + "Whiskers show 95% Wilson intervals for the failure rate.")
 
 
 def main():
@@ -210,14 +302,20 @@ def main():
     ap.add_argument("files", nargs="*", type=Path)
     ap.add_argument("--out-dir", type=Path, default=FIGURES_DIR)
     ap.add_argument("--p", type=float, help="noise level for the runtime and trade-off figures")
+    ap.add_argument("--tradeoff-only", action="store_true", help="render the accuracy versus runtime figure alone")
     args = ap.parse_args()
     files = args.files or sorted(RESULTS_DIR.glob("bench_*.csv"))[-1:]
     if not files:
         ap.error("no benchmark CSV found; run python -m src.evaluate first")
     rows = load_rows(files)
-    for path in [*plot_threshold(rows, args.out_dir), plot_latency(rows, args.out_dir, args.p),
-                 plot_tradeoff(rows, args.out_dir, args.p)]:
-        print(f"wrote {path}")
+    if args.tradeoff_only:
+        print(f"wrote {plot_tradeoff(rows, args.out_dir, args.p)}")
+        return
+    for path in [*plot_threshold(rows, args.out_dir), plot_distance(rows, args.out_dir, args.p),
+                 plot_latency(rows, args.out_dir, args.p), plot_tradeoff(rows, args.out_dir, args.p),
+                 plot_density(rows, args.out_dir, args.p)]:
+        if path is not None:
+            print(f"wrote {path}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+  "verified_at_utc": "2026-11-22T00:36:25Z",
+  "repository": "nvidia/Ising-Decoder-SurfaceCode-1-Fast",
+  "revision": "77b3a3f444612afe838fa0ece526b4c588541576",
+  "filename": "ising_decoder_surface_code_1_fast_r9_v1.0.77_fp16.safetensors",
+  "metadata_url": "https://huggingface.co/api/models/nvidia/Ising-Decoder-SurfaceCode-1-Fast/revision/77b3a3f444612afe838fa0ece526b4c588541576?blobs=true",
+  "published_field": "siblings[].lfs.sha256",
+  "published_sha256": "22db7ad25b584d7588493d6ef815381c8d1263cfb29f212391a591b285ad0a05",
+  "local_sha256": "22db7ad25b584d7588493d6ef815381c8d1263cfb29f212391a591b285ad0a05",
+  "published_bytes": 1826360,
+  "local_bytes": 1826360,
+  "user_reported_sha256": "22DB7AD25B584D7588493D6EF815381C8D1263CFB29F212391A591B285AD0A05",
+  "hash_algorithm": "SHA-256",
+  "match": true
+}

@@ -1,4 +1,7 @@
 .venv/
+.venv-ising/
+external/
+*.safetensors
 __pycache__/
 *.egg-info/
 .pytest_cache/

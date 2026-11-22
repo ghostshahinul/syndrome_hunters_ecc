@@ -1,4 +1,57 @@
-# Syndrome Hunters · FaultJoin
+# Syndrome Hunters surface-code decoders
+
+## NVIDIA Ising hybrid experiment
+
+We built a surface-code decoder that restores measured boundary checks after NVIDIA's pretrained Fast R9 predecoder, then applies correlated PyMatching. The CNN predicts local corrections and a logical frame. The matcher decodes the residual syndrome, and the decoder XORs the two logical predictions. The two reference hybrids use the published residual with either ordinary or correlated matching. [Implementation](src/decoders/ising.py) · [Architecture, installation and exact commands](docs/ising.md)
+
+**At distance 3 and 0.1% physical noise, the compiled hybrid beat correlated PyMatching on both logical accuracy and warmed runtime.** On 100,000 fresh Z-memory shots it made **94 errors (0.094%)** versus **137 (0.137%)**, with 68 paired shots favoring the hybrid and 25 favoring correlated matching (p = 0.00000938). The 2 MiB CPU lookup took **0.094 µs/shot** in batches of 64 versus **0.600 µs/shot** for correlated matching. Their single-call medians were 3.2 µs and 11.8 µs. The lookup reproduced every prediction of the streaming GPU hybrid. FaultJoin had the lowest observed failure count in this comparison, with 88. [Held-out measurements](results/ising/lookup-holdout/bench_20261122T002805003139Z.csv) · [Accuracy versus warmed runtime](figures/ising-lookup/accuracy_runtime.png)
+
+The lookup precomputes one million possible syndromes from the circuit and the pretrained model. It took **164.18 seconds** to build on the GPU. Including initialization and warm-up, the first 100,000-shot pass took **164.36 s** versus **0.062 s** for correlated matching. This optimization applies to the distance-3 circuit's 20 independent detector bits. Larger distances use streaming inference. [Compiler](src/decoders/ising_table.py) · [Timing breakdown](results/ising/lookup-holdout/bench_20261122T002805003139Z.json)
+
+At distance 9 and 0.5% physical noise, correlated PyMatching had the lowest error rate and decoded 4,996 shots/s. The boundary-restored hybrid removed 92.2% of detector events, but predicted 545 logical flips incorrectly and decoded 598 shots/s. At distance 3 and 0.1% noise, all three streaming hybrids missed 52 of 50,000 shots, compared with 85 for correlated matching. For the boundary-restored variant, 49 shots favored the hybrid and 16 favored correlated matching (paired p = 0.0000508). FaultJoin had 44 failures at this point. [Final CSV](results/ising/hybrid-final/bench_20261122T001433622270Z.csv) · [Run manifest](results/ising/hybrid-final/bench_20261122T001433622270Z.json)
+
+The final Z-memory grid used **one million shared shots** across four distances and five noise levels. We used NVIDIA's XV circuit and 25-channel noise family after auditing differences in detector ordering, schedule and logical observables in the legacy circuit. Each entrant saw the same 50,000 detector rows per point, with labels held back for scoring. The laptop ran Fast R9 in fp32 on its GTX 1650 Ti and the classical matchers on its Core i7-10750H. Distances below 9 are exploratory for this model. [Circuit audit](results/ising/circuit_audit.json) · [Hardware and checkpoint](results/ising/environment.json) · [Fast R9 model card](https://huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast)
+
+At **0.5% physical noise**, each cell gives **logical error rate / batch time in µs per shot**. Every decoder used batches of 64, one warmed pass, and rounds equal to distance. Single-shot p50/p95, startup, synchronized inference, matching time, density, memory and 95% Wilson intervals are in the manifest.
+
+| Decoder | Distance 3 | Distance 5 | Distance 7 | Distance 9 |
+|---|---:|---:|---:|---:|
+| Ordinary PyMatching | 2.074% / 0.88 | 2.164% / 6.98 | 1.826% / 26.56 | 1.188% / 83.36 |
+| Correlated PyMatching | 1.910% / 2.25 | **1.488%** / 16.83 | **0.960%** / 68.46 | **0.530%** / 200.16 |
+| FaultJoin | **1.750%** / 1.29 | 1.820% / 10.28 | 1.248% / 39.87 | 0.816% / 89.04 |
+| Weighted union–find | 2.888% / 1.53 | 2.488% / 17.05 | 2.118% / 68.74 | 1.512% / 185.43 |
+| Ising + ordinary PyMatching | 1.990% / 105.79 | 1.738% / 279.24 | 1.540% / 982.83 | 1.136% / 1,715.24 |
+| Ising + correlated PyMatching | 2.014% / 104.66 | 1.730% / 289.53 | 1.528% / 675.31 | 1.102% / 1,954.11 |
+| Ising + boundary restoration + correlated PyMatching | 1.996% / 109.87 | 1.734% / 302.65 | 1.498% / 711.50 | 1.090% / 1,673.00 |
+
+![Measured logical failure rate and warmed batch time for all seven decoders at four distances](figures/ising-hybrid/accuracy_runtime.png)
+
+[LER across physical noise levels](figures/ising-hybrid/logical_error_rates.png) · [LER across distances](figures/ising-hybrid/logical_error_by_distance.png) · [Batch and single-shot runtime](figures/ising-hybrid/runtime_scaling.png) · [Syndrome density and event removal](figures/ising-hybrid/syndrome_density.png) · [10,000-shot preliminary grid](results/ising/hybrid-preliminary/bench_20261121T233047900726Z.csv)
+
+### Run the hybrid locally
+
+From a fresh Windows checkout, install the inference dependencies in their own Python 3.12 environment. On this laptop, that environment and the verified model are already present.
+
+```powershell
+py -3.12 -m venv .venv-ising
+$py = ".\.venv-ising\Scripts\python.exe"
+git clone https://github.com/NVIDIA/Ising-Decoding.git external/Ising-Decoding
+git -C external/Ising-Decoding checkout --detach 4e5ef40494d13842aeee6cdf735b4d3134286dfa
+& $py -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.9.1
+& $py -m pip install -c requirements-ising-constraints.txt -r external/Ising-Decoding/code/requirements_public_inference.txt -e ".[dev]" huggingface_hub
+& $py -m src.ising_data download
+& $py -m src.ising_data doctor
+& $py -m pytest -q
+```
+
+To reproduce the independent distance-3 comparison, run this from the repository root. The full grid, figure-generation commands, CPU fallback and model-access instructions are in the experiment guide. [Reproduction guide](docs/ising.md)
+
+```powershell
+$py = ".\.venv-ising\Scripts\python.exe"
+& $py -m src.evaluate --source nvidia --decoders pymatching pymatching_correlated fault_join ising_boundary_correlated ising_boundary_table --distances 3 --ps 0.001 --shots 100000 --seed 20261123 --batch-size 64 --device cuda --precision fp32 --repeats 3 --latency-shots 128 --out-dir results/ising/lookup-holdout
+```
+
+## FaultJoin on the original Stim circuit
 
 **FaultJoin is our handwritten surface-code decoder.** Given the detectors that fired in a memory experiment, it predicts whether the stored logical qubit flipped. It uses whole circuit faults to vote on sparse syndromes and uses evidence from correlated detector clicks to decode denser syndromes. Stim generates the circuits and Monte Carlo shots. PyMatching supplies two independent benchmarks.
 

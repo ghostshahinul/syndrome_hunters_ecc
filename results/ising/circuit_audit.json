@@ -1,0 +1,549 @@
+{
+  "source_revision": "4e5ef40494d13842aeee6cdf735b4d3134286dfa",
+  "comparisons": [
+    {
+      "distance": 3,
+      "rounds": 3,
+      "p": 0.005,
+      "basis": "X",
+      "stim": {
+        "detectors": 24,
+        "observables": 1,
+        "detector_coordinates_present": 24,
+        "detector_coordinates_sha256": "859a13cb625f5b7f0172e7ae9ef3e4a80b930677cb2e63eeae2f6a221a428635",
+        "detector_order_sha256": "0ba6b839749cc1763aef91d16e72063e13edd178d90e9b24031e641dfb0e5fbc",
+        "first_detector_rec": [
+          -8
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-3] rec[-6] rec[-9]"
+        ],
+        "schedule_sha256": "d55d5d1b2ea02485057d88058a8cf6360de9bcf7c427417c39a467d19ed5e1c6",
+        "circuit_sha256": "895d2f27caf82f0928533c072b5a55330304ebb0d0dbb8a03252205419a8b8f7",
+        "dem_sha256": "d10b06fef24751b7838d2c72cefd7460ea9b3b58d835f38c61f6384e00dd9ee3",
+        "dem_errors": 291
+      },
+      "nvidia": {
+        "detectors": 24,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "da0600e87134ac10111eebf48527a8a49d76bf523712bbc1d8ae4896ac32b160",
+        "detector_order_sha256": "55ef15b9cc04a373fb0a89f6ac5a61e1fc86f223d2a45ebc20444d95fbb79c85",
+        "first_detector_rec": [
+          -8
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-9] rec[-8] rec[-7]"
+        ],
+        "schedule_sha256": "5b98518c0fa789a257a06d26090f713676a89c42399b9cb3b13988129dc06a07",
+        "circuit_sha256": "974d4610125b72053d13a2040a48f6e06bc9a14a0785cfc76486b9dc7370e489",
+        "dem_sha256": "c4bd37d874d081d8e0f8cc2b51bc68bd7d9c406c56477e9063605c864b30c349",
+        "dem_errors": 229
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 3,
+      "rounds": 3,
+      "p": 0.005,
+      "basis": "Z",
+      "stim": {
+        "detectors": 24,
+        "observables": 1,
+        "detector_coordinates_present": 24,
+        "detector_coordinates_sha256": "65dcdb13eebd6515eba7faae368ae28cc7ea16d198870fbabfac4bc94ef750f5",
+        "detector_order_sha256": "df6a91b4bb04191e6cba75400f730e76506b2947d316617d0cc46c582a30464d",
+        "first_detector_rec": [
+          -4
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-7] rec[-8] rec[-9]"
+        ],
+        "schedule_sha256": "61ecadc16d5cdfcd24bc58ca939b30530305c9613e037033583f507913c1a9de",
+        "circuit_sha256": "0670b3c37962732e37e0765b2c3f564fd0bd4ae3dea45dd8cea08b65ef495f91",
+        "dem_sha256": "04451e5e6c93c03e6f8fe12cb904f7a42bc941bfc82e9c09bb929564e39e63c1",
+        "dem_errors": 286
+      },
+      "nvidia": {
+        "detectors": 24,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "da0600e87134ac10111eebf48527a8a49d76bf523712bbc1d8ae4896ac32b160",
+        "detector_order_sha256": "0e0592d32b5f62a541e8a38451f130a290d2c2d34849e6da49ccd9ab7663c86e",
+        "first_detector_rec": [
+          -4
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-9] rec[-6] rec[-3]"
+        ],
+        "schedule_sha256": "02fcc9c758971748365c8e5b76b3da1f8513b14f88ac1aa471635ee674c6cb3f",
+        "circuit_sha256": "527f6083bf37d727c86dcb7bfcee19676fbe0924ecb7fed4b682f10b9706242c",
+        "dem_sha256": "3d8a2d50b619b2877cba621e1069ce18f8c4ee0bfaa8ec6575b1d832edb248a1",
+        "dem_errors": 232
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 5,
+      "rounds": 5,
+      "p": 0.005,
+      "basis": "X",
+      "stim": {
+        "detectors": 120,
+        "observables": 1,
+        "detector_coordinates_present": 120,
+        "detector_coordinates_sha256": "a43092cb4f2117908a4c5d4eefb85ac3a6b5b6935a10c7d25828a98504e2b03a",
+        "detector_order_sha256": "6d6424c38e1ebbd87ce613c2c71d87ab5fbb79c2f31662cc42781c6ff5952c59",
+        "first_detector_rec": [
+          -24
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-5] rec[-10] rec[-15] rec[-20] rec[-25]"
+        ],
+        "schedule_sha256": "cc3fd1d0227653c9cda27159d9c8fb09df5e797c65a1c551ab301ceeb1feabaa",
+        "circuit_sha256": "bd5f4b3be41b86ae40d1eb86a33a7436d86c3da48331b2c0e764922f8dfefbe5",
+        "dem_sha256": "fbb0afccc3cee36c6aa70633ce1aeb9f938baa30ef5b704feb825875611d5f35",
+        "dem_errors": 1958
+      },
+      "nvidia": {
+        "detectors": 120,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "7c512f697555539cf5d8a4ce338805fa184b266dbca3407ab0290137b2465e0e",
+        "detector_order_sha256": "fed484e38c174356bb5bf3df5c10e32ec4fd18aeb5d165b75af0ac4628da3e48",
+        "first_detector_rec": [
+          -24
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-25] rec[-24] rec[-23] rec[-22] rec[-21]"
+        ],
+        "schedule_sha256": "d413d03711ab7a3f600068aa33238cde6a183d8c82bd35843989d2e97ef719b1",
+        "circuit_sha256": "fb0fe915eca1f8e76f16f21d8590ea58c7dc9ff4809153c0832d5711f6b19f6a",
+        "dem_sha256": "14be2832ebf480207b33d2206e873544cb7e99426a7cfa2e589ac2fe13610c61",
+        "dem_errors": 1907
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 5,
+      "rounds": 5,
+      "p": 0.005,
+      "basis": "Z",
+      "stim": {
+        "detectors": 120,
+        "observables": 1,
+        "detector_coordinates_present": 120,
+        "detector_coordinates_sha256": "419db49d744b470e63f30350289ccfefcf7ab5a58572011d618d08d376c667e2",
+        "detector_order_sha256": "f549521cac9c243bd49d8581275f1ba5e2c802dde3a7be34b1c9c2276599fc6d",
+        "first_detector_rec": [
+          -17
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-21] rec[-22] rec[-23] rec[-24] rec[-25]"
+        ],
+        "schedule_sha256": "a8bb1d7c9c24e611154344ca20a7ca741cae5a7690aecff0c96a2d7b09e6e45b",
+        "circuit_sha256": "25c753d013b1e496d894ff07f15ac5c1602d3d12624da0bf1588652acce47e5f",
+        "dem_sha256": "e352b292cce7cc75f4ef342a97b04f7ad0679b37244961fe7dd9d29ffa37f9a3",
+        "dem_errors": 1953
+      },
+      "nvidia": {
+        "detectors": 120,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "7c512f697555539cf5d8a4ce338805fa184b266dbca3407ab0290137b2465e0e",
+        "detector_order_sha256": "aac447bfe984543f367882d69ddff4363bdac3f5e7833ba39a872a038b8011ec",
+        "first_detector_rec": [
+          -12
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-25] rec[-20] rec[-15] rec[-10] rec[-5]"
+        ],
+        "schedule_sha256": "40a5f23ab64762fc9f4ba2be8b6ce4cbf25dcfbde428a207ad46b48fa8ad64f0",
+        "circuit_sha256": "78c0b132ad8a707669d667f1bbeadb9bed81117d9ed1b7cd3d786c9c740568a7",
+        "dem_sha256": "bffa718daab60077b64b49f91937fc40cdeb5de43450918cfe1f4b63d79e6641",
+        "dem_errors": 1912
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 7,
+      "rounds": 7,
+      "p": 0.005,
+      "basis": "X",
+      "stim": {
+        "detectors": 336,
+        "observables": 1,
+        "detector_coordinates_present": 336,
+        "detector_coordinates_sha256": "dd0982d54ec9e5ffba098b1d68e02399eb0769d78a5543e953fc4467e9b96ebb",
+        "detector_order_sha256": "5195fecb053e92f6b378c6047a3f22567c9cc7c43d98f441dc8ee41c080f04a2",
+        "first_detector_rec": [
+          -48
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-7] rec[-14] rec[-21] rec[-28] rec[-35] rec[-42] rec[-49]"
+        ],
+        "schedule_sha256": "3e46aaa819ece01cb02607d533560d066ebcceec9a42941d2c256e94a52cb404",
+        "circuit_sha256": "8459284cbec4f6ba57fa0ec5f0d6256456c440aa0c6ca6068256bb7a1cbabe67",
+        "dem_sha256": "d4ebf37be8130ab4378224fcbe8753654544343a0c4e653cc89416aeb5cca738",
+        "dem_errors": 6605
+      },
+      "nvidia": {
+        "detectors": 336,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "ea6c8bd860b9e3e75c3d75a14406dbdbdcb11f6cc369718b6977230d4fd249b3",
+        "detector_order_sha256": "bce60d299e50fffbc54930bf4e6023d4788817c77eb1ed9fc3288ea2a91ae864",
+        "first_detector_rec": [
+          -48
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-49] rec[-48] rec[-47] rec[-46] rec[-45] rec[-44] rec[-43]"
+        ],
+        "schedule_sha256": "90a5576500d414d493110c4bb53a08319e58ac83e8c709a169c8461cd4a9d416",
+        "circuit_sha256": "3151ffb12500dc24655a692070a2efc24ce4117e25c7cc12887ca27c7c9841db",
+        "dem_sha256": "719de65ff50fbcc868bf82c9ddded9c62f503582800b16a579bee2603e48feb0",
+        "dem_errors": 6207
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 7,
+      "rounds": 7,
+      "p": 0.005,
+      "basis": "Z",
+      "stim": {
+        "detectors": 336,
+        "observables": 1,
+        "detector_coordinates_present": 336,
+        "detector_coordinates_sha256": "2673a35f0762554e29ec1458a992cb6eb68e414c69e4fde41c1bcfeb53d67ad4",
+        "detector_order_sha256": "f81d3277a6be3f888a4c27aa98111daac8632d71ed5b26fd22786bdc9639a956",
+        "first_detector_rec": [
+          -38
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-43] rec[-44] rec[-45] rec[-46] rec[-47] rec[-48] rec[-49]"
+        ],
+        "schedule_sha256": "453f75a466119bf5f2f183ac6b61909658987b5e2f3190408467aa06704b1c42",
+        "circuit_sha256": "9358c1990989cb0f21b7f1fae86e8c9b5dcb78d42580bce1e65bec9a90096a2d",
+        "dem_sha256": "b21f53725f57fed70af087250c3b0024781426dbf8a89e475dfd250aaa0ed98a",
+        "dem_errors": 6602
+      },
+      "nvidia": {
+        "detectors": 336,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "ea6c8bd860b9e3e75c3d75a14406dbdbdcb11f6cc369718b6977230d4fd249b3",
+        "detector_order_sha256": "bc6e8be3f161a6afe08c5c65e95de96740ed643b0c1ce90c9f1e5c7590556199",
+        "first_detector_rec": [
+          -24
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-49] rec[-42] rec[-35] rec[-28] rec[-21] rec[-14] rec[-7]"
+        ],
+        "schedule_sha256": "c27d45f1d1b66b39c1ccf85e9efba8a75ebea3e6a178cf9dadca0ccf6e07deb2",
+        "circuit_sha256": "9c974617c9de027bfa533c53738382e5cb8bc91b5596b0cf112361f61655f7b1",
+        "dem_sha256": "7e922f1c5d13f72dcf8c33b2a09d27101ed309ff6c9bdf15799b383e44c16342",
+        "dem_errors": 6214
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 9,
+      "rounds": 9,
+      "p": 0.005,
+      "basis": "X",
+      "stim": {
+        "detectors": 720,
+        "observables": 1,
+        "detector_coordinates_present": 720,
+        "detector_coordinates_sha256": "e77fe9a00eb4fa4035f57701b1122e97f933356e01df7f12b09c505a476292c6",
+        "detector_order_sha256": "826738844e6efe3350581d2f552a9b6e993c0c4ca7a8393903a18e6ee67fa61d",
+        "first_detector_rec": [
+          -80
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-9] rec[-18] rec[-27] rec[-36] rec[-45] rec[-54] rec[-63] rec[-72] rec[-81]"
+        ],
+        "schedule_sha256": "dbe39c653a27b2104d2d44fbae3bb2bbf491b1399c587c9041eff6bf90c702f6",
+        "circuit_sha256": "cdc3f89ee0b5e95f3908f346e5079cfc706e9b13517b23bc0cc20e7eaa1c355f",
+        "dem_sha256": "fc0dd91f8903cba8e231075993b7a9be5c891aabd3d6b6070341a4dbf47649b2",
+        "dem_errors": 14969
+      },
+      "nvidia": {
+        "detectors": 720,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "bb2b89404a04862d955024d6b85a52519c817223cb025f123e0cd2b607945cd7",
+        "detector_order_sha256": "874ddf5d3c345f09c0217adffbad744184976193a6fff87cc7e5165ea8b85fac",
+        "first_detector_rec": [
+          -80
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-81] rec[-80] rec[-79] rec[-78] rec[-77] rec[-76] rec[-75] rec[-74] rec[-73]"
+        ],
+        "schedule_sha256": "d2e388febefdbc450b02f8f21254c5219570922c99ba08b087bc70eb925988f5",
+        "circuit_sha256": "2e6ba6b5c1801941388fe43cc74cec23ec18ca1411a99b70252844b8f660ca69",
+        "dem_sha256": "bd4eed7b0187bd23db6bbad8cd4ca183321e853f5b50031a6c5b12f476e5d942",
+        "dem_errors": 14399
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    },
+    {
+      "distance": 9,
+      "rounds": 9,
+      "p": 0.005,
+      "basis": "Z",
+      "stim": {
+        "detectors": 720,
+        "observables": 1,
+        "detector_coordinates_present": 720,
+        "detector_coordinates_sha256": "3644334e97036a21a73d7ea5850262bcb54aba1614f792c52d03be6b58aa01c2",
+        "detector_order_sha256": "a290018daecf2f8bddce1a7666a592dd347a1526a1cba357a717c6b0b79f4f64",
+        "first_detector_rec": [
+          -67
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-73] rec[-74] rec[-75] rec[-76] rec[-77] rec[-78] rec[-79] rec[-80] rec[-81]"
+        ],
+        "schedule_sha256": "c70dd5782b188b5aca6338c1dae0e70b61f5224e0b79210052b5f299482a0dd1",
+        "circuit_sha256": "7bb46a79ad735218c010e6250fefeedcb9c42fb427f49c03ccefa3f0fae55f6e",
+        "dem_sha256": "04fb7aa87d5f2bc43f6ab17550010f69535f5541717115fa1fdfa92a2e49236e",
+        "dem_errors": 14966
+      },
+      "nvidia": {
+        "detectors": 720,
+        "observables": 1,
+        "detector_coordinates_present": 0,
+        "detector_coordinates_sha256": "bb2b89404a04862d955024d6b85a52519c817223cb025f123e0cd2b607945cd7",
+        "detector_order_sha256": "7b2a80d7df56f5c9c87d721fd410d5f7772b4733b4ebe68704d064b6ccc30cae",
+        "first_detector_rec": [
+          -40
+        ],
+        "observable_support": [
+          "OBSERVABLE_INCLUDE(0) rec[-81] rec[-72] rec[-63] rec[-54] rec[-45] rec[-36] rec[-27] rec[-18] rec[-9]"
+        ],
+        "schedule_sha256": "974f4f82e8795a75b0f3770df7523f0f57ad887734b347c34304e808e73dfcc7",
+        "circuit_sha256": "fa623efd9fd3e1ea84c9e1b88bed5ee094c537438dd021dc76924cd8ea7ffade",
+        "dem_sha256": "28aee0b4743b4f9947d4e5ac918f3a9196bc3e899a373679b8082ac4ac1a618e",
+        "dem_errors": 14408
+      },
+      "noise_sha256": "71d2b10e057ccf7dc905118b1eddb389a9a412aa0319394a88ecb24d83079aa1",
+      "nvidia_noise": {
+        "p_cnot_IX": 0.0003333333333333333,
+        "p_cnot_IY": 0.0003333333333333333,
+        "p_cnot_IZ": 0.0003333333333333333,
+        "p_cnot_XI": 0.0003333333333333333,
+        "p_cnot_XX": 0.0003333333333333333,
+        "p_cnot_XY": 0.0003333333333333333,
+        "p_cnot_XZ": 0.0003333333333333333,
+        "p_cnot_YI": 0.0003333333333333333,
+        "p_cnot_YX": 0.0003333333333333333,
+        "p_cnot_YY": 0.0003333333333333333,
+        "p_cnot_YZ": 0.0003333333333333333,
+        "p_cnot_ZI": 0.0003333333333333333,
+        "p_cnot_ZX": 0.0003333333333333333,
+        "p_cnot_ZY": 0.0003333333333333333,
+        "p_cnot_ZZ": 0.0003333333333333333,
+        "p_idle_cnot_X": 0.0016666666666666668,
+        "p_idle_cnot_Y": 0.0016666666666666668,
+        "p_idle_cnot_Z": 0.0016666666666666668,
+        "p_idle_spam_X": 0.0033222222222222225,
+        "p_idle_spam_Y": 0.0033222222222222225,
+        "p_idle_spam_Z": 0.0033222222222222225,
+        "p_meas_X": 0.003333333333333333,
+        "p_meas_Z": 0.003333333333333333,
+        "p_prep_X": 0.003333333333333333,
+        "p_prep_Z": 0.003333333333333333
+      }
+    }
+  ]
+}

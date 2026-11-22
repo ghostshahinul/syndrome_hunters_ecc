@@ -7,6 +7,7 @@ Writes one .npz per (d, p) into data/.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,13 @@ class Samples:
     @property
     def shots(self) -> int:
         return self.detection_events.shape[0]
+
+    def checksum(self) -> str:
+        """SHA-256 of row-packed detector bits followed by row-packed labels."""
+        digest = hashlib.sha256()
+        for bits in (self.detection_events, self.observable_flips):
+            digest.update(np.packbits(bits, axis=1).tobytes())
+        return digest.hexdigest()
 
 
 def sample(circuit: stim.Circuit, shots: int, seed: int | None = None) -> Samples:
