@@ -947,3 +947,27 @@ PyMatching is still non-overlapping). It is now the default for Hierarchical's d
 `uf3d_correlated`; plain `UnionFind3DConfig` stays ungated, and the golden configs are pinned to no gate.
 Gain: −14% (d=5), −23% (d=7), −20% (d=9) Hierarchical time. Still 1.55–2.0× PyMatching.
 **Caveat:** the rule was fitted at p = 0.5% only; at lower p clusters are smaller, so pass 2 runs less often.
+
+Step 3 commit: `d700754` (branch).
+
+## Step 4: frontier tracking (branch, 02:08 to 02:16). Prototype not faster, not adopted.
+- **Prototype:** a scratch copy of `union_find.py`, not committed, with per-cluster frontier
+  incidence lists ((node, edge) entries, linked lists spliced in O(1) on union, grown edges pruned
+  lazily) and a root list instead of the per-node root recomputation each round.
+- **Bit-identical** to the current kernel: predictions, corrections, ok, max_cluster on 3 tiers ×
+  d = 3/5/7/9 × 4 configs (plain, correlated, smallest-growth, gated), 1,500 shots each.
+- **Not faster** (same run, 50k shots, single thread; µs/shot current → frontier):
+  - plain UF: d=5 2.56 → 2.62, d=7 7.52 → 7.60, d=9 17.63 → 17.30 (0.98 / 0.99 / 1.02×);
+  - correlated UF: 5.79 → 6.07, 16.82 → 17.21, 38.95 → 38.61 (0.96 / 0.98 / 1.01×).
+- **Why:** a stage profile (timing-only kernel variants, same run) shows where plain UF's time goes:
+
+  | d | extracting lits | growth (incl. lits) | growth + peeling |
+  |---|---|---|---|
+  | 5 | 0.39 µs | 1.82 | 2.53 |
+  | 7 | 0.56 | 5.55 | 7.54 |
+  | 9 | 0.92 | 13.47 | 17.73 |
+
+  Growth is 70–73% and peeling 25–28%. The growth time is the random-access support increments on
+  the incident edges of active clusters (about 6 rounds per pass), not wasted scans, so restricting
+  the scan to frontier lists saves nothing.
+- **Decision:** revert, per the plan; the repo files were never changed.
