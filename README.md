@@ -12,6 +12,13 @@ thread vs single thread it costs **1.58× (d=7) and 1.54× (d=9)** PyMatching's 
 **not yet inside PyMatching's speed**. Correlated PyMatching is still more accurate (0.299% at d=9, run 40)
 and 2.7× PyMatching's time.
 
+## Team
+
+- \<name\> (role)
+- \<name\> (role)
+- \<name\> (role)
+- \<name\> (role)
+
 **What's here:** eight decoders of our own, all on Stim's detector error model:
 
 | Decoder | Registry name | One line |
@@ -37,6 +44,8 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib, pytest
 ```
+
+**All commands**
 
 | Task | Command |
 |---|---|
@@ -141,7 +150,8 @@ rotated memory experiment (d rounds plus the final data-readout layer).
   - We add the odd-clusters-only boundary rule in peeling (section 4).
 
 ### 2.5 Hierarchical (`src/decoders/cube3d/hierarchical.py`)
-- **How it works:** a predecoder plus a global decoder, the layout surveyed in arXiv 2307.14989.
+- **How it works:** a local predecoder plus a global decoder, after the Clique predecoder
+  papers (Jia, Veerapaneni & Ravi 2025, arXiv 2507.11481).
   Per shot:
   - lit = 0: no flip;
   - lit > K: the deep tier. Since item 4 this is **UF3D correlated** (section 2.6);
@@ -224,19 +234,30 @@ the same sampled shots (seed 0) for every decoder at each (d, p).
    instruction is decoded correctly whenever the fast path accepts it. But they can only
    finish sparse shots on their own (`fast_path_fraction_latest.png`).
 3. **Our own UF** (UnionFind3D) decodes everything, and its failure rate falls with d at every
-   p ≤ 0.5% (`accuracy_runtime_sweep_latest.png`). It is 1.00–1.27× PyMatching at p = 0.5%.
+   p from 0.2% to 0.5% (`accuracy_runtime_sweep_latest.png`; at p = 0.1%, d = 7 and 9 have 0 and
+   1 failures in 100k shots, too few to tell). Its failure rate is 1.10× / 1.18× / 1.26×
+   PyMatching's at d = 5/7/9, p = 0.5% (operating-point run 40).
 4. **Hierarchical**: the fast path takes the easy shots, and UF takes the rest.
 5. **Correlations**: decoding each sublattice independently throws away the fact that one Y or hook
    fault lights edges in both. Correlated two-pass UF puts that information back, and as
    Hierarchical's deep tier it **beats plain PyMatching** at d = 5/7/9
-   (`results/operating_point/operating_point_run22.png`). Accuracy in the sweep is in
-   `accuracy_runtime_sweep_latest.png`.
-   - **Accuracy:** exactly UF's failures at d ≥ 5, within the CI at d=3.
-   - **Speed:** 1.2–3.0× faster single-thread than UF on sparse shots.
-   - **Scaling:** both scale over threads (`thread_scaling_latest.png`).
+   (`results/operating_point/operating_point_run40.png`). Accuracy over p is in
+   `accuracy_runtime_sweep_latest.png` and `results/error_rate_sweep/sweep_run1_*.png`.
+   - **Accuracy:** lower failure rate than plain PyMatching at d = 5/7/9 with non-overlapping
+     95% CIs (d=9: 0.511% vs 0.670%, run 40).
+   - **Speed:** 1.54–2.01× plain PyMatching's single-thread time at d = 5–9 (run 40).
+   - **Scaling:** UnionFind3D and Hierarchical scale over threads (`thread_scaling_latest.png`).
 
-The figures in `results/plots/` (`*_latest.png`) come from benchmark run 1
-(`python -m src.benchmark`, commit `5e7b5ff`). Section 5 has the numbers.
+Where the figures come from:
+- `accuracy_runtime`, `accuracy_runtime_sweep`, `cube_collapse_story`, `fast_path_fraction` and
+  `thread_scaling` (`*_latest.png`): benchmark run of 2026-11-22 02:20
+  (`results/*_20261122_022050.csv`, commit `5660331`, the same code as operating-point run 40).
+- `demo_latest.png`: `python -m scripts.demo`, run right after it (added in commit `b10af2e`).
+- `ensemble_vs_M_latest.png`: the ensemble experiment (`scripts/item2_ensemble.py`, added in commit `bb08c23`).
+- `mwpm_tier_p0_*_latest.png`: the Milestone 5 three-tier run (added in commit `cbb5d67`).
+- The operating-point and sweep figures carry their run number in the file name.
+
+Section 5 has the numbers.
 
 ---
 
@@ -534,6 +555,24 @@ branch's own README and docstrings.
   [`aRAYofsunshine07-patch-1`](https://github.com/ghostshahinul/syndrome_hunters_ecc/tree/aRAYofsunshine07-patch-1).
   It adds notes on minimum-weight perfect matching's strengths and weaknesses to `notebooks/MWPM.txt`, with a link
   to fusion-blossom.
+
+---
+
+## References
+
+- A. deMarti iOlius, P. Fuentes, R. Orús, P. M. Crespo and J. Etxezarreta Martinez, *Decoding
+  algorithms for surface codes*, Quantum 8, 1498 (2024),
+  [arXiv:2307.14989](https://arxiv.org/abs/2307.14989).
+- Z. Jia, S. Veerapaneni and G. S. Ravi, *Enhancing the Clique Local Decoder to Correct
+  Length-2 Space Errors in the Surface Code* (Clique_L2), IEEE QCE 2025,
+  [arXiv:2507.11481](https://arxiv.org/abs/2507.11481).
+- N. Delfosse and N. H. Nickerson, *Almost-linear time decoding algorithm for topological
+  codes*, Quantum 5, 595 (2021), [arXiv:1709.06218](https://arxiv.org/abs/1709.06218).
+- C. Gidney, *Stim: a fast stabilizer circuit simulator*, Quantum 5, 497 (2021),
+  [arXiv:2103.02202](https://arxiv.org/abs/2103.02202).
+- O. Higgott and C. Gidney, *Sparse Blossom: correcting a million errors per core second with
+  minimum-weight matching* (PyMatching 2), Quantum 9, 1600 (2025),
+  [arXiv:2303.15933](https://arxiv.org/abs/2303.15933).
 
 ---
 
