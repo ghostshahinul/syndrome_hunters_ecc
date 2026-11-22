@@ -59,3 +59,118 @@ gitignored. Operating-point runs 2 to 4 are committed.
 **Commit:** (see Milestone 1 commit below)
 
 **Next:** Milestone 2, Hierarchical decoder.
+
+Milestone 1 commit: `217235f`.
+
+---
+
+## Milestone 2: Hierarchical decoder (20:06 to 20:20, time-box 2.5 h)
+
+**What was built**
+- `src/decoders/cube3d/hierarchical.py`: `Hierarchical(graph, HierarchicalConfig(gate, K, strict_r1, uf))`.
+  Registered as **`hierarchical`** (whole-shot gate, K=6) and **`hierarchical_partial`**
+  (partial gate, no K cap). Both are picked up by the generic tests and the operating-point
+  figure automatically.
+  - **numba backend:** one fused `prange` kernel. Per shot it runs the local rules, applies the gate, then
+    runs UF on the whole shot or on the residual.
+  - **reference backend:** NumPy Cube3D-Local plus the Python UF reference. It is
+    bit-identical to the numba backend (tested, 3 tiers × d=3/5 × both gates × strict on/off, plus d=7).
+- Cube3D-Local gains a **numba backend**, `local_shot`, which is bit-identical to the NumPy
+  reference: 3 tiers × d=3/5/7 × K ∈ {0, 2, 6, 10, ∞} × strict on/off. It works with
+  snapshot-per-color semantics and an incrementally maintained count of lit neighbours.
+- **UF speed-up, results unchanged:** shots are processed in chunks of 64 that share one scratch
+  workspace, only touched entries are reset, and empty shots exit early. This removed about 16 allocations
+  per shot: UF at d=3 p=0.1% went from 1.02 to 0.46 µs single-thread in the same session. The
+  predictions are unchanged, as all bit-identity tests still pass.
+- **Serial-overhead fix:** the batch wrappers had been computing `dets.sum(axis=1)` in NumPy.
+  That alone cost about 0.35 µs/shot at d=9 and made the 12-thread Hierarchical 1.8× slower than UF
+  (0.95 vs 0.53 µs). Lit counts are now computed inside the kernels, and the gap is 0.59 vs 0.55 µs.
+- New option `strict_r1` (R1 pairs must be isolated within distance 2). Off by default; see below.
+
+**Setup:** circuit-level noise, rounds = d, 100,000 shots, seed 0 (the same shots for every
+decoder at each (d, p)). Single-thread and 12-thread times are best of 2 after warm-up.
+PyMatching runs single-threaded in the same run.
+CSV: `results/hierarchical/hierarchical_20261121_201348.csv`. It includes the K sweep;
+the main rows have `main=True`.
+
+**LER (failures / 100k, 95% Wilson CI), whole-shot gate K=6**
+
+| p | d | PyMatching | UnionFind3D | Hierarchical | H ÷ PM |
+|---|---|---|---|---|---|
+| 0.1% | 3 | 0.0610% [0.048, 0.078] | 0.0830% [0.067, 0.103] | 0.0840% [0.068, 0.104] | 1.38× |
+| 0.1% | 5 | 0.0190% | 0.0210% | 0.0210% | 1.11× |
+| 0.1% | 7 | 0.0010% (1) | 0.0000% (0) | 0.0000% (0) | n/a |
+| 0.1% | 9 | 0.0010% (1) | 0.0010% (1) | 0.0010% (1) | 1.00× |
+| 0.2% | 3 | 0.2950% [0.263, 0.331] | 0.3180% [0.285, 0.355] | 0.3460% [0.312, 0.384] | 1.17× |
+| 0.2% | 5 | 0.1090% | 0.1330% | 0.1330% | 1.22× |
+| 0.2% | 7 | 0.0210% | 0.0310% | 0.0310% | 1.48× |
+| 0.2% | 9 | 0.0060% | 0.0110% | 0.0110% | 1.83× |
+| 0.5% | 3 | 1.755% [1.675, 1.838] | 1.755% [1.675, 1.838] | 1.821% [1.740, 1.906] | 1.04× |
+| 0.5% | 5 | 1.353% [1.283, 1.427] | 1.480% [1.407, 1.557] | 1.480% [1.407, 1.557] | 1.09× |
+| 0.5% | 7 | 1.019% [0.959, 1.083] | 1.169% [1.104, 1.238] | 1.169% [1.104, 1.238] | 1.15× |
+| 0.5% | 9 | 0.712% [0.662, 0.766] | 0.922% [0.865, 0.983] | 0.922% [0.865, 0.983] | 1.29× |
+
+At d ≥ 5 the whole-shot Hierarchical makes exactly the same number of failures as UF. Every
+difference is at d=3, and it comes from the fast path.
+
+**Fast path (whole-shot, K=6): fraction of all shots it decoded alone, and its failures on the
+accepted non-empty shots vs UF's failures on those same shots**
+
+| p | d=3 | d=5 | d=7 | d=9 |
+|---|---|---|---|---|
+| 0.1% | 99.7%; 38 vs 37 of 15,597 | 94.2%; 3 vs 3 of 51,489 | 64.0%; 0 vs 0 of 55,130 | 16.3%; 0 vs 0 of 15,759 |
+| 0.2% | 98.7%; 184 vs 156 of 27,534 | 79.3%; 9 vs 9 of 61,109 | 20.9%; 0 vs 0 of 20,131 | 0.5%; 0 vs 0 of 472 |
+| 0.5% | 93.4%; 982 vs 916 of 50,639 | 29.7%; 15 vs 15 of 28,383 | 0.1%; 0 vs 0 of 147 | 0.0%; none accepted |
+
+**µs/shot, single-thread (12-thread in brackets)**
+
+| p | d | UF | Hier. whole-shot | Hier. partial | PyMatching (1 thr) |
+|---|---|---|---|---|---|
+| 0.1% | 3 | 0.24 (0.06) | **0.08** (0.02) | 0.08 (0.03) | 0.10 |
+| 0.1% | 5 | 0.66 (0.09) | **0.43** (0.07) | 0.43 (0.09) | 0.53 |
+| 0.1% | 7 | 1.70 (0.25) | 1.42 (0.23) | **1.24** (0.19) | 1.25 |
+| 0.1% | 9 | 3.49 (0.49) | 3.52 (0.54) | **2.75** (0.41) | 2.94 |
+| 0.2% | 3 | 0.30 (0.05) | **0.14** (0.04) | 0.14 (0.03) | 0.18 |
+| 0.2% | 5 | 1.06 (0.16) | **0.93** (0.15) | 0.93 (0.14) | 0.87 |
+| 0.2% | 7 | 2.90 (0.44) | 2.89 (0.58) | 2.89 (0.48) | 2.71 |
+| 0.2% | 9 | 6.15 (0.93) | 6.35 (0.92) | 6.53 (0.95) | 6.29 |
+| 0.5% | 3 | 0.44 (0.09) | 0.33 (0.07) | **0.30** (0.06) | 0.42 |
+| 0.5% | 5 | 2.39 (0.33) | 2.42 (0.33) | 2.91 (0.42) | 2.61 |
+| 0.5% | 7 | 7.18 (0.98) | 7.49 (1.08) | 9.65 (1.26) | 8.64 |
+| 0.5% | 9 | 17.16 (2.36) | 17.36 (2.54) | 22.36 (3.05) | 21.47 |
+
+**Partial gate: LER vs UF on the same shots.** It costs accuracy beyond the CI at d=9 p=0.5%:
+1.066% [1.004, 1.132] vs 0.922% [0.865, 0.983]. It is also worse at d=7 p=0.5%
+(1.264% vs 1.169%), d=9 p=0.2% (0.023% vs 0.011%) and d=7 p=0.2% (0.047% vs 0.031%).
+Following the plan's rule, **the default is the whole-shot gate**.
+- Cause: R1 only tests isolation at distance 1, so in dense shots it pairs the ends of two
+  different chains. With `strict_r1=True` (distance-2 isolation) the partial gate is back
+  within the CI: 0.939% [0.881, 1.001] at d=9 and 1.182% at d=7, p=0.5%. But it costs 1.8× UF's
+  time (32.3 vs 18.0 µs at d=9), because the distance-2 counts run for every R1 candidate.
+  It's kept as an option, off by default. Data: same-seed 100k-shot run, single-thread;
+  numbers in this paragraph come from a scratch script and are not in the CSV.
+
+**K sweep, 2 to 10:** in the CSV. For whole-shot and d ≥ 5, LER equals UF's at every K.
+The fast-path fraction rises with K and levels off by K≈8 to 10. The speedup is best at K = 6 to 10.
+K=10 vs K=6 gives at most 6% more speed (0.77 vs 0.83 relative time at d=7 p=0.1%). At d=3 the fast
+path's LER penalty grows from 1.00× (K=2) to 1.04 to 1.09× (K≥5), within the CI. K=6 stays the default.
+
+**Acceptance targets, as of now**
+- Hierarchical and UF3D LER decrease with d at p=0.5%: **met.** 1.821 → 1.480 → 1.169 → 0.922%
+  (H); 1.755 → 1.480 → 1.169 → 0.922% (UF).
+- Hierarchical within the 95% CI of UF3D: **met at every (p, d)** for the whole-shot gate.
+- Hierarchical faster than UF3D: **partly met.** Single-thread speedup:
+  - 1.2 to 3.0× at d ≤ 5 for p ≤ 0.2%, and at d=3 for p=0.5%;
+  - 1.2× at d=7 p=0.1%;
+  - 0.95 to 1.0× (1–5% slower) at d ≥ 7 for p ≥ 0.2% and at d ≥ 5 for p=0.5%. There the fast
+    path accepts 0 to 21% of shots and adds the cost of scanning them.
+- Stretch, Hierarchical ≤ 1.5× PyMatching at d=7: **met at p=0.5%** (1.15×) and at p=0.2% (1.48×).
+- Single-thread vs PyMatching, the fair comparison: Hierarchical is faster at d=9 p=0.5%
+  (17.36 vs 21.47 µs), d=7 p=0.5% (7.49 vs 8.64) and d=3 everywhere. It is slower at d=7/9
+  for p ≤ 0.2% (for example 3.52 vs 2.94 µs at d=9 p=0.1%).
+
+**Tests:** `tests/test_cube3d_hierarchical.py` (186 tests with the local suite): bit-identity,
+both gates' semantics, K=0 equals UF, every single DEM component, consistent counts.
+Full suite: 425 passed, 24 skipped, 1 xfailed.
+
+**Next:** Milestone 3, figures.

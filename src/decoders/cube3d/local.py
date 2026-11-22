@@ -3,6 +3,8 @@
 Rules (any edge type, so measurement errors and hook errors use the same rule):
   R1  lit u whose ONLY lit neighbor is v, and v's ONLY lit neighbor is u
       -> flip the highest-probability (u, v) edge, clear u and v.
+      With strict_r1=True the pair must also be isolated within graph distance 2
+      (the only lit node within distance 2 of u is v and vice versa), as in R2.
   R2  unlit c with exactly 2 lit neighbors a, b, where the only lit node within graph
       distance 2 of a is b and vice versa -> flip (a, c) and (c, b), clear a and b.
   R3  lit u with a boundary edge and no other lit node within graph distance 2
@@ -43,6 +45,7 @@ LOCAL_BACKENDS = ("reference", "numba")
 class Cube3DLocalConfig:
     K: int = 6                 # accept only shots with at most K detection events
     backend: str = "reference"
+    strict_r1: bool = False    # R1 pairs must be isolated within distance 2
 
     def __post_init__(self) -> None:
         if self.K < 0:
@@ -114,7 +117,8 @@ def _gather(lit: np.ndarray, rows: np.ndarray, idx: np.ndarray) -> np.ndarray:
 
 
 def run_local(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndarray,
-              K: int = 6, record_flips: bool = False, record_residual: bool = False) -> LocalResult:
+              K: int = 6, record_flips: bool = False, record_residual: bool = False,
+              strict_r1: bool = False) -> LocalResult:
     dets = np.asarray(detection_events, dtype=bool)
     S = dets.shape[0]
     lit_count = dets.sum(axis=1, dtype=np.int32)
@@ -157,6 +161,8 @@ def run_local(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndar
                 j = np.argmax(L, axis=1)
                 v = g.nbr[c, j]
                 keep = _gather(lit, s, g.nbr[v]).sum(axis=1) == 1    # v's only lit neighbor is u
+                if strict_r1:
+                    keep &= (_gather(lit, s, tables.ball2[c]).sum(axis=1) == 1) &                             (_gather(lit, s, tables.ball2[v]).sum(axis=1) == 1)
                 s, c, j, v = s[keep], c[keep], j[keep], v[keep]
                 if s.size == 0:
                     continue
@@ -256,7 +262,7 @@ def _clear(lit, nlc, nbr, x):
 
 @njit(cache=True)
 def local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits, cleared,
-               work):
+               strict_r1, work):
     """Apply R1, R2, R3 in place on one shot's lit (uint8, n). Adds cleared counts per rule
     to cleared (3,). Returns (observable bits of the flipped edges, lit nodes remaining)."""
     (nlc, litlist, cand, by_color, seen, start, fill, act_a, act_b, act_e, act_f, init) = work
@@ -348,6 +354,8 @@ def local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_o
                     v = nbr[c, jj]
                     if nlc[v] != 1:
                         continue
+                    if strict_r1 and (_count_lit(lit, ball2[c]) != 1 or _count_lit(lit, ball2[v]) != 1):
+                        continue
                     act_a[na] = c
                     act_b[na] = v
                     act_e[na] = nbr_edge[c, jj]
@@ -408,7 +416,7 @@ def local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_o
 
 
 @njit(parallel=True, cache=True)
-def _local_batch(dets, K, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits,
+def _local_batch(dets, K, strict_r1, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits,
                  out_bits, out_rem, out_cleared, residual, out_lit):
     record = residual.shape[0] > 0
     S = dets.shape[0]
@@ -428,7 +436,7 @@ def _local_batch(dets, K, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, 
                 out_rem[s] = c
             else:
                 b, rem = local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
-                                    edge_obs_bits, out_cleared[s], work)
+                                    edge_obs_bits, out_cleared[s], strict_r1, work)
                 out_bits[s] = b
                 out_rem[s] = rem
             if record:
@@ -436,7 +444,7 @@ def _local_batch(dets, K, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, 
 
 
 def run_local_numba(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndarray,
-                    K: int = 6, record_residual: bool = False) -> LocalResult:
+                    K: int = 6, record_residual: bool = False, strict_r1: bool = False) -> LocalResult:
     dets = np.ascontiguousarray(detection_events, dtype=np.uint8)
     S = dets.shape[0]
     bits = np.zeros(S, np.uint64)
@@ -444,7 +452,7 @@ def run_local_numba(g: DetectorGraph3D, tables: LocalTables, detection_events: n
     cl = np.zeros((S, 3), np.int32)
     residual = np.zeros((S, g.n_det) if record_residual else (0, g.n_det), np.uint8)
     lit_count = np.zeros(S, np.int32)
-    _local_batch(dets, min(int(K), g.n_det), g.nbr, g.nbr_edge, tables.ball2, g.boundary_edge,
+    _local_batch(dets, min(int(K), g.n_det), bool(strict_r1), g.nbr, g.nbr_edge, tables.ball2, g.boundary_edge,
                  tables.color, tables.n_colors, g.edge_obs_bits, bits, rem, cl, residual, lit_count)
     accepted = rem == 0
     shifts = np.arange(g.n_obs, dtype=np.uint64)
@@ -481,5 +489,7 @@ class Cube3DLocal:
         if backend == "numba":
             if record_flips:
                 raise ValueError("record_flips is only available on the reference backend")
-            return run_local_numba(self.graph, self.tables, dets, K, record_residual)
-        return run_local(self.graph, self.tables, dets, K, record_flips, record_residual)
+            return run_local_numba(self.graph, self.tables, dets, K, record_residual,
+                                   self.config.strict_r1)
+        return run_local(self.graph, self.tables, dets, K, record_flips, record_residual,
+                         self.config.strict_r1)

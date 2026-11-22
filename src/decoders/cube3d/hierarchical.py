@@ -27,7 +27,7 @@ from numba import njit, prange
 
 from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
-from src.decoders.cube3d.local import Cube3DLocal, local_shot, local_work
+from src.decoders.cube3d.local import Cube3DLocal, Cube3DLocalConfig, local_shot, local_work
 from src.decoders.cube3d.union_find import (CHUNK, UnionFind3D, UnionFind3DConfig, _uf_shot,
                                             bits_to_bool, uf_decode_shot_reference, uf_work)
 
@@ -41,6 +41,7 @@ class HierarchicalConfig:
     gate: str = "whole_shot"
     K: int | None = None          # None -> DEFAULT_K[gate] (None there = no cap)
     backend: str = "numba"
+    strict_r1: bool = False       # fast-path R1 pairs must be isolated within distance 2
     uf: UnionFind3DConfig = field(default_factory=UnionFind3DConfig)
 
     def __post_init__(self) -> None:
@@ -80,7 +81,7 @@ class HierarchicalResult:
 
 
 @njit(parallel=True, cache=True)
-def _hier_batch(dets, K, partial,
+def _hier_batch(dets, K, partial, strict_r1,
                 nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
                 out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit):
@@ -116,7 +117,7 @@ def _hier_batch(dets, K, partial,
             cl[1] = 0
             cl[2] = 0
             bl, rem = local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
-                                 obs_bits, cl, lw)
+                                 obs_bits, cl, strict_r1, lw)
             out_cleared[s] = cl[0] + cl[1] + cl[2]
             if rem == 0:
                 out_bits[s] = bl
@@ -140,7 +141,7 @@ class Hierarchical:
     def __init__(self, graph: DetectorGraph3D, config: HierarchicalConfig | None = None):
         self.graph = graph
         self.config = config or HierarchicalConfig()
-        self.local = Cube3DLocal(graph)
+        self.local = Cube3DLocal(graph, Cube3DLocalConfig(strict_r1=self.config.strict_r1))
         self.uf = UnionFind3D(graph, self.config.uf)
 
     def effective_K(self, gate: str, K: int | None) -> int:
@@ -170,7 +171,7 @@ class Hierarchical:
         lit_count = np.zeros(S, np.int32)
         if backend == "numba":
             lt, ut = self.local.tables, self.uf.tables
-            _hier_batch(dets, K, gate == "partial",
+            _hier_batch(dets, K, gate == "partial", self.config.strict_r1,
                         g.nbr, g.nbr_edge, lt.ball2, g.boundary_edge, lt.color, lt.n_colors,
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
                         g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count)

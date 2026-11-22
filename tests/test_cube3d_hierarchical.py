@@ -7,7 +7,7 @@ from src.circuits import NOISE_TIERS, tier_circuit
 from src.decoders import DECODERS
 from src.decoders.cube3d.graph import detector_graph
 from src.decoders.cube3d.hierarchical import GATES, Hierarchical, HierarchicalConfig
-from src.decoders.cube3d.local import RULES, Cube3DLocal
+from src.decoders.cube3d.local import RULES, Cube3DLocal, Cube3DLocalConfig
 from src.decoders.cube3d.union_find import UnionFind3D
 
 TIER_P = {"code_capacity": 0.05, "phenomenological": 0.01, "circuit": 0.005}
@@ -28,11 +28,12 @@ def dets_for_edges(g, edges):
 
 
 # ---- Cube3D-Local: numba == reference ----------------------------------------------------
+@pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("K", [0, 2, 6, 10, 10_000])
 @pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5, 7)])
-def test_local_numba_bit_identical(tier, d, K):
+def test_local_numba_bit_identical(tier, d, K, strict):
     g = detector_graph(tier, d, TIER_P[tier])
-    loc = Cube3DLocal(g)
+    loc = Cube3DLocal(g, Cube3DLocalConfig(strict_r1=strict))
     dets, _ = sample(tier, d, 1500, seed=11 + d)
     ref = loc.run(dets, K=K, record_residual=True, backend="reference")
     fast = loc.run(dets, K=K, record_residual=True, backend="numba")
@@ -52,11 +53,12 @@ def test_local_numba_rejects_record_flips():
 
 
 # ---- Hierarchical ------------------------------------------------------------------------
+@pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("gate", GATES)
 @pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
-def test_hierarchical_numba_bit_identical(tier, d, gate):
+def test_hierarchical_numba_bit_identical(tier, d, gate, strict):
     g = detector_graph(tier, d, TIER_P[tier])
-    h = Hierarchical(g, HierarchicalConfig(gate=gate))
+    h = Hierarchical(g, HierarchicalConfig(gate=gate, strict_r1=strict))
     dets, _ = sample(tier, d, 300, seed=21 + d)
     ref = h.run(dets, backend="reference")
     fast = h.run(dets, backend="numba")
