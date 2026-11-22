@@ -1,10 +1,18 @@
 """Accuracy vs batch time at one operating point (circuit-level rotated memory).
 
-For each distance: sample `shots` once (fixed seed), decode the same samples with every
-decoder, and record logical failure rate (95% Wilson interval) and batch time per shot
-(wall time of one decode call over all shots / shots, decoder construction excluded).
+For each distance, `batches` independent batches of `shots` shots are sampled (seeds
+seed, seed+1, ...). Every decoder decodes the same batches. Per decoder and distance:
+  - logical failure rate pooled over all batches (95% Wilson interval);
+  - batch time per shot = one decode call over a batch / shots, averaged over the batches,
+    with the fastest and slowest batch kept as a spread (decoder construction and warm-up
+    excluded).
+numba decoders (UnionFind3D, Hierarchical) run on `threads` threads (default 1, the fair
+comparison with single-threaded PyMatching). The machine fingerprint goes into every row.
 
-CLI:  python -m src.operating_point --distances 3 5 7 --p 0.005 --shots 50000
+Default decoders: PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D,
+Hierarchical. Cube-Collapse and Hierarchical (partial) can be added with --decoders.
+
+CLI:  python -m src.operating_point --distances 3 5 7 9 --p 0.005 --shots 50000 --batches 5
 Each run writes results/operating_point/operating_point_run<N>.csv and .png, with N
 one higher than the last run (never overwrites). pytest uses the same numbering.
 """
@@ -30,7 +38,8 @@ from src.decoders.cube_collapse import CubeCollapseDecoder
 from src.decoders.cube_collapse.baselines import decode_2d, pymatching_2d
 from src.decoders.cube_collapse.filter import temporal_filter
 from src.decoders.cube_collapse.layout import build_cube
-from src.figures import display_name, style_for
+from src.figures import display_name, machine_line, style_for
+from src.machine import fingerprint
 
 # (label, factory(dem) -> decode(dets) -> predictions). Order = legend + colour order.
 DecodeFn = Callable[[np.ndarray], np.ndarray]
@@ -85,6 +94,23 @@ def implemented_registry_decoders() -> dict[str, Callable[[stim.DetectorErrorMod
     return out
 
 
+OPERATING_POINT_DECODERS = ("PyMatching", "Correlated PyMatching", "PyMatching 2D on flat",
+                            "UnionFind3D", "Hierarchical")
+
+
+def available_factories() -> dict[str, Callable[[stim.DetectorErrorModel], DecodeFn]]:
+    """Every decoder the operating point can run, by display name."""
+    return {**DECODER_FACTORIES, **implemented_registry_decoders()}
+
+
+def default_factories(names=OPERATING_POINT_DECODERS) -> dict[str, Callable[[stim.DetectorErrorModel], DecodeFn]]:
+    avail = available_factories()
+    missing = [n for n in names if n not in avail]
+    if missing:
+        raise KeyError(f"unknown decoder(s) {missing}; choose from {list(avail)}")
+    return {n: avail[n] for n in names}
+
+
 def wilson_interval(k: int, n: int, z: float = 1.959963984540054) -> tuple[float, float]:
     """95% Wilson score interval for a binomial proportion k/n."""
     if n == 0:
@@ -107,30 +133,72 @@ class OperatingPoint:
     ler: float
     ler_low: float
     ler_high: float
-    us_per_shot: float
+    us_per_shot: float          # mean over batches of (batch decode time / shots per batch)
+    batches: int = 1
+    shots_per_batch: int = 0
+    us_min: float = 0.0         # fastest batch
+    us_max: float = 0.0         # slowest batch
+    threads: int = 1            # numba threads (PyMatching is always single-threaded)
+    backend: str = ""
+    cpu: str = ""
+    cpu_mhz: str = ""
+    power: str = ""
+    git_commit: str = ""
 
 
-def measure(distances=(3, 5, 7), p: float = 0.005, shots: int = 50_000, seed: int = 0,
-            factories: dict | None = None, log: Callable[[str], None] | None = print) -> list[OperatingPoint]:
-    factories = factories or {**DECODER_FACTORIES, **implemented_registry_decoders()}
+NUMBA_DECODERS = {"UnionFind3D", "Hierarchical", "Hierarchical (partial)"}
+
+
+def measure(distances=(3, 5, 7, 9), p: float = 0.005, shots: int = 50_000, seed: int = 0,
+            factories: dict | None = None, log: Callable[[str], None] | None = print,
+            batches: int = 1, threads: int = 1) -> list[OperatingPoint]:
+    """`shots` per batch; `batches` independent batches per distance (seeds seed + b)."""
+    import numba
+
+    from src.decoders.cube3d.union_find import set_threads
+
+    factories = factories or default_factories()
+    fp = fingerprint()
+    old_threads = numba.get_num_threads()
+    set_threads(min(threads, numba.config.NUMBA_NUM_THREADS))
     rows = []
-    for d in distances:
-        circuit = surface_code_circuit(d, p)
-        dem = detector_error_model(circuit)
-        dets, obs = circuit.compile_detector_sampler(seed=seed).sample(shots, separate_observables=True)
-        for label, factory in factories.items():
-            decode = factory(dem)
-            decode(dets[:16])  # warm-up: first-call allocation / caches
-            t0 = time.perf_counter()
-            pred = decode(dets)
-            elapsed = time.perf_counter() - t0
-            k = int(np.any(pred != obs, axis=1).sum())
-            lo, hi = wilson_interval(k, shots)
-            row = OperatingPoint(label, d, d, p, shots, k, k / shots, lo, hi, 1e6 * elapsed / shots)
-            rows.append(row)
-            if log:
-                log(f"d={d} {label:<24} failures={k:>5}/{shots}  LER={100 * row.ler:.3f}% "
-                    f"[{100 * lo:.3f}, {100 * hi:.3f}]  {row.us_per_shot:.2f} us/shot")
+    try:
+        for d in distances:
+            circuit = surface_code_circuit(d, p)
+            dem = detector_error_model(circuit)
+            sampler = circuit.compile_detector_sampler(seed=seed)
+            decoders = {label: factory(dem) for label, factory in factories.items()}
+            fails = {label: 0 for label in decoders}
+            times = {label: [] for label in decoders}
+            for b in range(batches):
+                if b:
+                    sampler = circuit.compile_detector_sampler(seed=seed + b)
+                dets, obs = sampler.sample(shots, separate_observables=True)
+                for label, decode in decoders.items():
+                    if b == 0:
+                        decode(dets[:16])  # warm-up: numba JIT, first-call allocation, caches
+                    t0 = time.perf_counter()
+                    pred = decode(dets)
+                    times[label].append(1e6 * (time.perf_counter() - t0) / shots)
+                    fails[label] += int(np.any(pred != obs, axis=1).sum())
+            total = shots * batches
+            for label in decoders:
+                k = fails[label]
+                lo, hi = wilson_interval(k, total)
+                ts = times[label]
+                numba_dec = label in NUMBA_DECODERS
+                row = OperatingPoint(label, d, d, p, total, k, k / total, lo, hi, float(np.mean(ts)),
+                                     batches, shots, float(min(ts)), float(max(ts)),
+                                     threads if numba_dec else 1,
+                                     "numba" if numba_dec else "python/C++",
+                                     fp["cpu"], fp["cpu_mhz"], fp["power"], fp["git_commit"])
+                rows.append(row)
+                if log:
+                    log(f"d={d} {label:<24} failures={k:>6}/{total}  LER={100 * row.ler:.3f}% "
+                        f"[{100 * lo:.3f}, {100 * hi:.3f}]  {row.us_per_shot:.2f} us/shot "
+                        f"(batches {row.us_min:.2f}-{row.us_max:.2f})")
+    finally:
+        set_threads(old_threads)
     return rows
 
 
@@ -163,11 +231,14 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
         for r in pts:
             color, marker = style[r.decoder]
             y = 100 * r.ler
+            xerr = None
+            if r.batches > 1:
+                xerr = [[r.us_per_shot - r.us_min], [r.us_max - r.us_per_shot]]
             ax.errorbar(r.us_per_shot, y, yerr=[[y - 100 * r.ler_low], [100 * r.ler_high - y]],
-                        fmt=marker, color=color, ms=9, mec=SURFACE, mew=1.5,
+                        xerr=xerr, fmt=marker, color=color, ms=9, mec=SURFACE, mew=1.5,
                         elinewidth=2, capsize=4, capthick=2, zorder=3)
         ax.set_title(f"Distance {d}", fontsize=14, color=INK, pad=10)
-        ax.set_xlim(0, max(r.us_per_shot for r in pts) * 1.12)
+        ax.set_xlim(0, max(max(r.us_per_shot, r.us_max) for r in pts) * 1.12)
         ax.set_xlabel("Batch time per shot (µs)", fontsize=12, color=INK_2)
         ax.grid(True, axis="y", color=GRID, lw=0.8, zorder=0)
         for side in ("top", "right"):
@@ -180,17 +251,25 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
     fig.text(0.06, 0.985, "Accuracy and batch time at one operating point",
              fontsize=22, fontweight="bold", color=INK, va="top")
     run_label = f"  ·  run {run_number}" if run_number is not None else ""
-    fig.text(0.06, 0.915, f"Rotated Z memory  ·  rounds = distance  ·  {first.shots:,} shots per point"
+    shots_label = (f"{first.batches} batches × {first.shots_per_batch:,} shots per point"
+                   if first.batches > 1 else f"{first.shots:,} shots per point")
+    fig.text(0.06, 0.915, f"Rotated Z memory  ·  rounds = distance  ·  {shots_label}"
              f"  ·  physical error {100 * first.p:.2f}%  ·  circuit-level noise{run_label}",
              fontsize=12, color=INK_2, va="top")
     handles = [Line2D([], [], color=style[n][0], marker=style[n][1], ms=9, lw=2.5, label=n)
                for n in decoders]
     fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.055, 0.875), ncol=len(decoders),
                frameon=False, fontsize=12, handlelength=2.2, columnspacing=2.2)
+    numba_threads = sorted({r.threads for r in rows if r.backend == "numba"})
+    batch_note = (f" Time = mean over {first.batches} batches; horizontal whiskers span the fastest "
+                  f"and slowest batch." if first.batches > 1 else "")
+    meta = {"cpu": first.cpu or None, "power": first.power, "git_commit": first.git_commit,
+            "threads_note": (f"numba decoders on {numba_threads[-1]} thread(s), PyMatching 1 thread"
+                             if numba_threads else "")}
     fig.text(0.06, 0.015, "Lower and further left is better. Whiskers show 95% Wilson intervals "
-             "for the failure rate. Batch time = one decode call over all shots / shots.",
-             fontsize=10.5, color=INK_2)
-    fig.subplots_adjust(left=0.06, right=0.98, top=0.71, bottom=0.17, wspace=0.18)
+             "for the failure rate. Batch time = one decode call over all shots / shots." + batch_note
+             + "\n" + machine_line(meta), fontsize=10.5, color=INK_2, linespacing=1.5)
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.71, bottom=0.2, wspace=0.18)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, facecolor=SURFACE)
     plt.close(fig)
@@ -234,12 +313,17 @@ def save_run(rows: list[OperatingPoint], directory: Path = RUNS_DIR) -> tuple[in
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--distances", type=int, nargs="+", default=[3, 5, 7])
+    ap.add_argument("--distances", type=int, nargs="+", default=[3, 5, 7, 9])
     ap.add_argument("--p", type=float, default=0.005)
-    ap.add_argument("--shots", type=int, default=50_000)
+    ap.add_argument("--shots", type=int, default=50_000, help="shots per batch")
+    ap.add_argument("--batches", type=int, default=5, help="independent batches per point")
+    ap.add_argument("--threads", type=int, default=1, help="numba threads for our decoders")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--decoders", nargs="+", default=list(OPERATING_POINT_DECODERS),
+                    help=f"display names; available: {list(DECODER_FACTORIES)} + registry decoders")
     args = ap.parse_args()
-    rows = measure(args.distances, args.p, args.shots, args.seed)
+    rows = measure(args.distances, args.p, args.shots, args.seed, default_factories(args.decoders),
+                   batches=args.batches, threads=args.threads)
     n, csv_path, png_path = save_run(rows)
     print(f"run {n}: wrote {csv_path} and {png_path}")
 

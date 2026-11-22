@@ -10,7 +10,9 @@ def pytest_addoption(parser):
     parser.addoption("--no-plots", action="store_true",
                      help="don't write test plots to results/tests/")
     parser.addoption("--op-shots", type=int, default=50_000,
-                     help="shots per point for the accuracy/runtime operating-point test")
+                     help="shots per batch for the accuracy/runtime operating-point test")
+    parser.addoption("--op-batches", type=int, default=3,
+                     help="independent batches per point for the operating-point test")
 
 
 def pytest_configure(config):

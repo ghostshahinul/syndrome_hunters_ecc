@@ -34,6 +34,7 @@ pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib,
 | One part only | `python -m src.benchmark --only accuracy` (or `sweep`, `threads`) |
 | Regenerate figures from saved CSVs | `python -m src.figures --accuracy results/accuracy_runtime_<ts>.csv --sweep results/sweep_<ts>.csv --threads results/thread_scaling_<ts>.csv` |
 | Milestone experiments | `python -m scripts.m1_uf_experiments`, `python -m scripts.m2_hierarchical` |
+| Operating point (5 decoders, d = 3–9, 5 batches × 50k shots, numba on 1 thread) | `python -m src.operating_point` |
 
 Each benchmark writes CSVs to `results/` and figures to `results/plots/` as
 `<name>_<timestamp>.png` plus `<name>_latest.png`. Nothing is ever overwritten. Every CSV
@@ -269,7 +270,7 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 
 ## 6. Test suite
 
-`python -m pytest -q` runs 459 tests in about 21 s on the laptop: 434 pass, 24 are skipped (stub decoders) and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). Plots of the recorded metrics go to
+`python -m pytest -q` runs 464 tests in about 50 s on the laptop: 439 pass, 24 are skipped (stub decoders) and 1 is an expected failure (Cube-Collapse vs PyMatching at circuit-level d=5). Plots of the recorded metrics go to
 `results/tests/<run>/` (`--no-plots` skips them).
 
 | File | What it checks |
@@ -283,7 +284,7 @@ Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:
 | `test_cube3d_hierarchical.py` | local numba == reference (all K, strict on/off), Hierarchical numba == reference (both gates), gate semantics, K=0 equals UF |
 | `test_cc_*.py` | Cube-Collapse stages: filter series, graph vs code-capacity DEM, Clique fixtures, completion, exhaustive low-weight errors |
 | `test_figures.py` | each figure function on a tiny synthetic CSV; never-overwrite; style registry unique |
-| `test_operating_point.py` | writes `results/operating_point/operating_point_run<N>.png` on every run |
+| `test_operating_point.py` | PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D and Hierarchical at p = 0.5%, d = 3/5/7/9, 3 batches × 50k shots (`--op-batches`, `--op-shots`). Writes `results/operating_point/operating_point_run<N>.png`. At d=9, every 3D decoder beats d=7 with non-overlapping CIs, and 2D-on-flat gets worse |
 | `test_performance.py` | Stim stage timings and decoder µs/shot vs distance (recorded, loose bounds) |
 
 ---

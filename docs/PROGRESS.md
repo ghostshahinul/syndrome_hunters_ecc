@@ -261,3 +261,34 @@ already in the venv.
   off if the trigger (UF cluster size or count) sends a small fraction of shots (≲1%) to MWPM
   *and* those shots hold a good share of UF's failures. I'll measure both and report honestly,
   including if the trigger turns out not to find UF's mistakes.
+
+---
+
+## Push + operating-point update (20:33 to 20:40, requested by you)
+- **Push:** merged `origin/main` (2 commits, `notebooks/MWPM.txt` only, no overlap with our
+  files), ran the suite (green) and pushed `main` to `34653ec`. The remote branches `shahi_2`
+  (FaultJoin), `shahi_3` (FaultJoin + NVIDIA Ising hybrid) and `aRAYofsunshine07-patch-1`
+  (MWPM notes) were **not** merged. That's a team decision, and they edit shared test and plot files.
+- **Operating point (`src/operating_point.py`, `tests/test_operating_point.py`):**
+  - **Batches:** each point is now B independent batches (seeds 0, 1, …). LER is pooled over
+    them. Time is the mean batch µs/shot, and the fastest and slowest batch are drawn as
+    horizontal whiskers.
+  - **Decoders, distances, threads:** the default set is PyMatching, Correlated PyMatching,
+    PyMatching 2D on flat, UnionFind3D and Hierarchical. Cube-Collapse and Hierarchical
+    (partial) can be added with `--decoders`. Distances are 3/5/7/9, and numba runs on 1 thread.
+  - **CSV and figure:** every row records threads, backend, CPU, MHz, power and commit. The
+    footer shows the machine line.
+  - **CLI vs pytest:** the CLI defaults to 5 batches × 50k shots. pytest defaults to 3 × 50k
+    (`--op-batches`, `--op-shots`).
+  - **New tests:** at d=9 PyMatching, Correlated PyMatching, UnionFind3D and Hierarchical each
+    beat d=7 with non-overlapping CIs (4 parametrized tests), and PyMatching 2D on flat gets
+    worse at d=9.
+- **Operating-point run 10** (3 × 50k = 150k shots per point, p = 0.5%, 1 thread). LER %, then µs/shot as mean (fastest–slowest):
+
+  | d | PyMatching | Correlated PM | PM 2D on flat | UnionFind3D | Hierarchical |
+  |---|---|---|---|---|---|
+  | 3 | 1.700; 0.30 | 1.653; 0.90 | 2.619; 0.32 | 1.717; 0.50 | 1.789; 0.36 |
+  | 5 | 1.391; 2.48 | 1.063; 6.98 | 5.542; 1.55 | 1.534; 2.41 | 1.534; 2.45 |
+  | 7 | 1.014; 8.50 (8.33–8.76) | 0.610; 23.74 | 11.758; 4.71 | 1.212; 7.46 (7.38–7.55) | 1.212; 7.52 (7.42–7.69) |
+  | 9 | 0.663; 20.29 (20.23–20.39) | 0.276; 59.54 | 21.013; 11.10 | 0.842; 17.44 (17.33–17.55) | 0.842; 17.80 (17.54–18.01) |
+- Full suite: 439 passed, 24 skipped, 1 xfailed in 48.5 s (the d=9 operating point adds about 25 s).
