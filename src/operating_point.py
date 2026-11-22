@@ -277,6 +277,79 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
     return path
 
 
+def plot_operating_point_uncertainty(rows: list[OperatingPoint], path: Path, run_number: int | None = None,
+                                     decoders=("PyMatching", "Correlated PyMatching", "UnionFind3D",
+                                               "Hierarchical")) -> Path:
+    """The operating point with its uncertainty drawn as boxes: height = 95% Wilson interval of
+    the failure rate, width = fastest to slowest batch; marker at (mean time, LER). Each panel
+    has its own y range so the intervals are visible, and each box is labelled with its interval."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch, Rectangle
+
+    from src.figures import SLIDE_COLORS
+
+    rows = [r for r in rows if r.decoder in decoders]
+    distances = sorted({r.distance for r in rows})
+    first = rows[0]
+    fig, axes = plt.subplots(1, len(distances), figsize=(5.6 * len(distances), 6.4), facecolor=SURFACE,
+                             squeeze=False)
+    axes = axes[0]
+    for ax, d in zip(axes, distances):
+        ax.set_facecolor(SURFACE)
+        pts = [r for r in rows if r.distance == d]
+        lo, hi = 100 * min(r.ler_low for r in pts), 100 * max(r.ler_high for r in pts)
+        span = hi - lo
+        xmax = max(r.us_max for r in pts) * 1.15
+        for r in pts:
+            color = SLIDE_COLORS.get(r.decoder, MUTED)
+            y0, y1 = 100 * r.ler_low, 100 * r.ler_high
+            ax.add_patch(Rectangle((r.us_min, y0), r.us_max - r.us_min, y1 - y0, facecolor=color, alpha=0.22,
+                                   edgecolor=color, lw=1.6, zorder=2))
+            ax.plot(r.us_per_shot, 100 * r.ler, marker=style_for(r.decoder).marker, color=color, ms=9,
+                    mec=SURFACE, mew=1.2, zorder=4)
+            ax.annotate(f"{100 * r.ler:.3f}%\n[{y0:.3f}, {y1:.3f}]", (r.us_per_shot, y1),
+                        xytext=(0, 5), textcoords="offset points", ha="center", va="bottom",
+                        fontsize=9.5, color=color, fontweight="bold", linespacing=1.15, zorder=5)
+        ax.set_xlim(0, xmax)
+        ax.set_ylim(lo - 0.12 * span, hi + 0.32 * span)
+        ax.set_title(f"Distance {d}", fontsize=14, color=INK, pad=10)
+        ax.set_xlabel("Batch time per shot (µs)", fontsize=12, color=INK_2)
+        ax.grid(True, color=GRID, lw=0.8, zorder=0)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(AXIS)
+        ax.tick_params(colors=INK_2, labelsize=11, length=4, color=AXIS)
+    axes[0].set_ylabel("Logical failures per shot (%)", fontsize=12, color=INK_2)
+
+    fig.text(0.05, 0.985, "Operating point with its range of uncertainty", fontsize=22, fontweight="bold",
+             color=INK, va="top")
+    run_label = f"  ·  run {run_number}" if run_number is not None else ""
+    fig.text(0.05, 0.915, f"Rotated Z memory  ·  rounds = distance  ·  {first.batches} batches × "
+             f"{first.shots_per_batch:,} shots per point  ·  physical error {100 * first.p:.2f}%  ·  "
+             f"circuit-level noise{run_label}", fontsize=12, color=INK_2, va="top")
+    handles = [Line2D([], [], color=SLIDE_COLORS.get(n, MUTED), marker=style_for(n).marker, ms=9, lw=0,
+                      mec=SURFACE, label=n) for n in decoders]
+    handles.append(Patch(facecolor=INK_2, alpha=0.22, edgecolor=INK_2,
+                         label="box: height = 95% CI, width = fastest–slowest batch"))
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.045, 0.875), ncol=len(handles),
+               frameon=False, fontsize=12, handlelength=1.6, columnspacing=2.0)
+    meta = {"cpu": first.cpu or None, "power": first.power, "git_commit": first.git_commit,
+            "threads_note": "every decoder single-thread (PyMatching too)"}
+    fig.text(0.05, 0.015, "Lower and further left is better. Each panel has its own vertical scale. Label = "
+             "failure rate and its 95% Wilson interval. Hierarchical's deep tier is UF3D correlated (not drawn; "
+             "at d = 5–9 its failure rate is within 0.002 points of Hierarchical's).\n" + machine_line(meta),
+             fontsize=10.5, color=INK_2, linespacing=1.5)
+    fig.subplots_adjust(left=0.055, right=0.985, top=0.75, bottom=0.17, wspace=0.2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return path
+
+
 def write_csv(rows: list[OperatingPoint], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "x", newline="", encoding="utf-8") as f:

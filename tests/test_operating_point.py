@@ -74,3 +74,13 @@ def test_suppression_table_and_csv_roundtrip(tmp_path):
     assert "| 0.5% | PyMatching | 2.00 | – |" in suppression_markdown(rows)
     pt = OperatingPoint("PyMatching", 5, 5, 0.005, 100, 3, 0.03, 0.01, 0.08, 2.5, 2, 50, 2.0, 3.0)
     assert load_operating_point(write_csv([pt], tmp_path / "op.csv")) == [pt]
+
+
+def test_uncertainty_figure(tmp_path):
+    from src.operating_point import OperatingPoint, plot_operating_point_uncertainty
+    pts = [OperatingPoint(n, d, d, 0.005, 1000, k, k / 1000, (k - 4) / 1000, (k + 4) / 1000, t, 2, 500, t * 0.9, t * 1.1)
+           for d in (5, 7) for n, k, t in (("PyMatching", 14, 2.0), ("Correlated PyMatching", 11, 6.0),
+                                             ("UnionFind3D", 15, 2.2), ("UF3D correlated", 12, 4.5),
+                                             ("Hierarchical", 12, 4.6))]
+    path = plot_operating_point_uncertainty(pts, tmp_path / "unc.png", run_number=1)
+    assert path.exists() and path.stat().st_size > 10_000
