@@ -698,3 +698,33 @@ Phase B commit: `dd31a12` (pushed).
 **Decision: keep.** The table makes every single fault exact and costs nothing measurable. It
 cannot help at d ≥ 7, where shots have about 25–56 events. Hierarchical ÷ PyMatching in this run:
 2.13× (d=5), 2.04× (d=7), 1.88× (d=9).
+
+Phase C commit: `406f75a` (pushed).
+
+## Phase D: cluster-local pass 2 (00:39 to 00:45). Tried and reverted.
+**What was built** (then reverted; the code is in this session's history, not in the repo):
+- **Pass 1:** exports each visited node's cluster root.
+- **Touched clusters:** those containing an endpoint of a reweighted partner edge (radius 0), or
+  also a neighbour of one (radius 1).
+- **Pass 2:** decodes only the touched clusters' events with the reweighted lengths.
+- **Candidate:** pass-1 flips of the untouched clusters XOR the pass-2 flips, kept if its
+  correlated score is lower.
+- **Checks:** numba equalled a Python reference; the syndrome was consistent on every shot;
+  agreement with whole-shot pass 2 was 100% on 400 shots each of circuit d=5/7 and phenomenological d=5.
+
+**Benchmark** (`results/optimization/phaseD_20261122_004308.csv`, 250k shots, p = 0.5%, single thread):
+
+| d | whole-shot pass 2 (UF-corr) | local, radius 0 | local, radius 1 | PyMatching |
+|---|---|---|---|---|
+| 5 | 1.2260% · 5.80 µs | 1.2344% · 6.51 µs | 1.2264% · 8.89 µs | 1.3828% · 2.39 µs |
+| 7 | 0.8348% · 16.99 µs | 0.8536% · 17.85 µs | 0.8340% · 25.51 µs | 1.0348% · 8.34 µs |
+| 9 | 0.4964% · 38.80 µs | 0.5080% · 39.77 µs | 0.4960% · 58.01 µs | 0.6696% · 20.25 µs |
+
+(Hierarchical with each deep-tier variant: the same pattern within ±3%.)
+
+**Decision: revert.**
+- **Radius 0** is 3–12% *slower* and slightly worse (within the CI).
+- **Radius 1** matches whole-shot accuracy but is 45–55% slower: it marks nearly every cluster, and
+  the labelling, marking and XOR bookkeeping cost more than they save.
+- **Why there's little to save:** pass 2 still has to decode about 60% of the clusters (13 of 22 at
+  d=9), and growing a subset of clusters costs about the same per cluster as growing them all.

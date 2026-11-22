@@ -51,6 +51,7 @@ CONFIGS = {
     "ufc_notable": _uf(correlated=True),
     "hier": _h(),
     "hier_notable": _h(table=False),
+    # Phase D (cluster-local pass 2) configs were removed with the reverted code; see PROGRESS.md
 }
 
 
