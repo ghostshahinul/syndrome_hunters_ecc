@@ -108,7 +108,12 @@ def build_uf_tables(g: DetectorGraph3D, scale: int = 4, growth: str = "all") -> 
 def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarray,
                              stats: dict | None = None) -> tuple[int, list[int], bool]:
     """Decode one shot. Returns (observable bits, sorted flipped edge ids, ok).
-    If `stats` is given, stats["max_cluster"] = node count of the largest final cluster."""
+    If `stats` is given it receives the per-shot instrumentation (the reference is the
+    instrumented implementation; the numba kernel runs the same algorithm uninstrumented):
+      max_cluster  node count of the largest final cluster
+      rounds       growth rounds          idle_rounds  rounds in which no edge completed
+      lit          detection events       clusters     final clusters (distinct roots)
+      labels       {node: root} for every node in a cluster"""
     n, B = g.n_det, g.n_det
     lit = [int(v) for v in np.flatnonzero(dets_row)]
     parent: dict[int, int] = {}
@@ -152,10 +157,12 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
     def incident(u: int):
         return [int(e) for e in g.inc_edge[u] if e >= 0]
 
+    rounds = idle = 0
     while True:
         active = {find(v) for v in visited if parity[find(v)] == 1 and not touches[find(v)]}
         if not active:
             break
+        rounds += 1
         if t.smallest:
             m = min(size[r] for r in active)
             active = {r for r in active if size[r] == m}
@@ -174,6 +181,8 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
         if not grew:
             ok = False  # an odd cluster with nothing left to grow (no boundary path)
             break
+        if not newly:
+            idle += 1
         for e in newly:
             grown.add(e)
             u, v = int(g.edge_u[e]), int(g.edge_v[e])
@@ -228,6 +237,9 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
         ok = False
     if stats is not None:
         stats["max_cluster"] = max((size[find(v)] for v in parent), default=0)
+        stats["rounds"], stats["idle_rounds"], stats["lit"] = rounds, idle, len(lit)
+        stats["labels"] = {v: find(v) for v in parent}
+        stats["clusters"] = len(set(stats["labels"].values()))
     bits = 0
     for e in flipped:
         bits ^= int(g.edge_obs_bits[e])
@@ -266,13 +278,25 @@ def uf_correlated_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.n
     bits, flipped, ok = uf_decode_shot_reference(g, t, dets_row, st1)
     result = (bits, flipped, ok, st1)
     len2 = correlated_lengths(t, flipped)
+    ran = kept = False
+    rounds2 = 0
     if not np.array_equal(len2, t.length):
+        ran = True
         st2: dict = {}
         b2, f2, ok2 = uf_decode_shot_reference(g, replace(t, length=len2), dets_row, st2)
+        rounds2 = st2["rounds"]
         if correlated_score(t, f2) < correlated_score(t, flipped):
             result = (b2, f2, ok2, st2)
+            kept = True
     if stats is not None:
         stats.update(result[3])
+        # pass-1 clusters that contain an endpoint of a reweighted edge
+        changed = np.flatnonzero(len2 != t.length)
+        labels = st1["labels"]
+        touched = {labels[int(x)] for e in changed for x in (g.edge_u[e], g.edge_v[e]) if int(x) in labels}
+        stats.update(pass2_ran=ran, pass2_kept=kept, touched_clusters=len(touched),
+                     clusters_pass1=st1["clusters"], rounds_pass1=st1["rounds"], rounds_pass2=rounds2,
+                     idle_rounds_pass1=st1["idle_rounds"], reweighted_edges=len(changed))
     return result[:3]
 
 

@@ -1,0 +1,16 @@
+d,p,shots,decoder,us_per_shot,threads,cpu,cpu_mhz,power,logical_cpus,git_commit
+5,0.005,50000,PyMatching,2.449231999926269,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+5,0.005,50000,UnionFind3D,2.4844559998018667,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+5,0.005,50000,UF3D correlated,5.568606000160798,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+5,0.005,50000,Hierarchical,5.423814000096172,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+5,0.005,50000,local fast path only (K=6),0.39443999994546175,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+7,0.005,50000,PyMatching,8.416013999958523,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+7,0.005,50000,UnionFind3D,7.524180000182241,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+7,0.005,50000,UF3D correlated,17.08814000012353,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+7,0.005,50000,Hierarchical,16.791768000111915,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+7,0.005,50000,local fast path only (K=6),0.38331400020979345,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+9,0.005,50000,PyMatching,19.08964600006584,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+9,0.005,50000,UnionFind3D,16.829826000030152,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+9,0.005,50000,UF3D correlated,36.86957399942912,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+9,0.005,50000,Hierarchical,37.238666000193916,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty
+9,0.005,50000,local fast path only (K=6),0.6283859995892271,1,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced / mode Best performance,12,9dd32a6+dirty

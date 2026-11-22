@@ -565,3 +565,57 @@ talk outline has a punchline, slide 7b (correlations) and updated slide-8 number
    Stale caches crash dependent kernels.
 4. **Possible next step to get *inside* PyMatching's speed:** run pass 2 only on the clusters that
    changed. Today pass 2 redoes the whole shot.
+
+Item 4 commit: `0f7054f` (pushed).
+
+---
+
+# Optimization round (from 23:50): get Hierarchical inside plain PyMatching's single-thread speed
+
+**Timing setup for every run:**
+- **Power:** AC power, Windows 11 power mode switched to **"Best performance"** (registry
+  `ActiveOverlayAcPowerScheme = ded574b5…`). The plan is still "Balanced"; only the mode changed. Undo with
+  `powercfg /overlaysetactive 00000000-0000-0000-0000-000000000000`, or Settings → Power.
+- **numba:** cache cleared at the start of each timing script (`src.machine.clear_numba_cache`).
+- **Warm-up and threads:** warm-up before timing; single thread.
+- **Fingerprint:** each CSV row includes the power mode.
+
+## Phase A: measure (23:50 to 00:02)
+- **Instrumentation:** per-shot counters live in the **Python reference** UF and correlated UF:
+  rounds, idle rounds, lit, clusters, max cluster, pass 2 ran or kept, clusters touched by a
+  reweighted edge, and the number of reweighted edges. The reference runs the identical
+  algorithm and is bit-identical to numba, so the counts describe the numba runs exactly, and
+  the numba kernels pay **zero cost** (they are unchanged).
+- **Script:** `scripts/opt_a_measure.py`. CSVs: `results/optimization/phaseA_20261121_235854.csv`
+  (time split) and `phaseA_counters_20261121_235854.csv`.
+
+**Time split** (single thread, best of 3, 50k shots, p = 0.5%, same shots):
+
+| d | PyMatching | UnionFind3D | UF3D correlated | Hierarchical | local fast path only (K=6) | H ÷ PM |
+|---|---|---|---|---|---|---|
+| 5 | 2.45 µs | 2.48 | 5.57 | 5.42 | 0.39 | 2.21× |
+| 7 | 8.42 | 7.52 | 17.09 | 16.79 | 0.38 | 1.99× |
+| 9 | 19.09 | 16.83 | 36.87 | 37.24 | 0.63 | 1.95× |
+
+**Counters** (correlated UF, all shots; mean / p50 / p90 / p99):
+
+| d | lit | rounds, pass 1 | idle rounds, pass 1 | rounds, pass 2 | clusters | touched clusters | reweighted edges | pass 2 ran / kept |
+|---|---|---|---|---|---|---|---|---|
+| 5 | 8.3 / 8 / 14 / 19 | 5.05 / 5 / 6 / 11 | 2.28 (45% of rounds) | 4.65 | 4.1 | 2.2 | 29 | 98% / 19% |
+| 7 | 25.0 / 25 / 35 / 44 | 6.01 / 5 / 8 / 12 | 2.06 (34%) | 5.50 | 10.8 | 6.1 | 89 | 100% / 43% |
+| 9 | 55.8 / 55 / 70 / 83 | 6.86 / 6 / 10 / 12 | 2.06 (30%) | 6.14 | 22.4 | 13.0 | 200 | 100% / 64% |
+
+**Readout**
+- **The deep tier is the whole cost.** Hierarchical sends 99.8% (d=7) and 100% (d=9) of shots to UF.
+  The fast path costs 0.4–0.6 µs per shot.
+- **Correlated UF costs 2.2× plain UF.** Plain UF is already 0.88× PyMatching, so reaching ≤ 1.0×
+  needs the correlated path itself about 2× faster.
+- **Skip-ahead (B1)** removes about 2 of every 6–7 rounds per pass (30–45% of rounds are idle).
+- **Cluster-local pass 2 (D)** could skip the 40–45% of clusters that no reweighted edge touches.
+- **The table lookup (C)** can matter only at d ≤ 5; at d=7 the median shot has 25 events.
+
+**Golden outputs** for Phase B: `tests/golden/golden_outputs.npz` (237 KB) and `tests/test_golden.py`.
+They hold predictions, ok, max_cluster, a correction hash and the chosen variant for plain UF,
+correlated UF, Hierarchical (both gates and both deep tiers) and the correlated ensemble (M=4),
+on 600 shots each for 3 tiers × d = 3/5/7 plus circuit d=9. They were generated from the code
+before Phase B.

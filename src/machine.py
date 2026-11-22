@@ -69,7 +69,57 @@ def power_state() -> str:
     plan = _run(["powercfg", "/getactivescheme"])
     if "(" in plan:
         line += " / " + plan[plan.rfind("(") + 1:plan.rfind(")")]
+    overlay = _power_overlay()
+    if overlay:
+        line += f" / mode {overlay}"
     return line
+
+
+OVERLAYS = {"ded574b5-45a0-4f42-8737-46345c09c238": "Best performance",
+            "961cc777-2547-4f9d-8174-7d86181b8a7a": "Best power efficiency",
+            "00000000-0000-0000-0000-000000000000": "Balanced"}
+
+
+def _power_overlay() -> str:
+    """Windows 11 power mode (overlay on the plan) for the current power source."""
+    try:
+        import winreg
+
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes")
+        st = _Status_ac()
+        name = "ActiveOverlayAcPowerScheme" if st else "ActiveOverlayDcPowerScheme"
+        guid = str(winreg.QueryValueEx(key, name)[0]).lower()
+        return OVERLAYS.get(guid, guid)
+    except OSError:
+        return ""
+
+
+def _Status_ac() -> bool:
+    class _S(ctypes.Structure):
+        _fields_ = [("ACLineStatus", ctypes.c_byte), ("BatteryFlag", ctypes.c_byte),
+                    ("BatteryLifePercent", ctypes.c_byte), ("SystemStatusFlag", ctypes.c_byte),
+                    ("BatteryLifeTime", ctypes.c_ulong), ("BatteryFullLifeTime", ctypes.c_ulong)]
+    st = _S()
+    return bool(ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st))) and st.ACLineStatus == 1
+
+
+def clear_numba_cache(root: str | os.PathLike | None = None) -> int:
+    """Delete numba's on-disk cache (*.nbi, *.nbc) under src/. Its index does not notice edits
+    to callees in other files, so a stale cache can crash or mis-time a kernel. Returns the
+    number of files removed. Call before importing/compiling kernels for a timing run."""
+    from pathlib import Path
+
+    base = Path(root) if root else Path(__file__).resolve().parent
+    n = 0
+    for pattern in ("*.nbi", "*.nbc"):
+        for f in base.rglob(pattern):
+            try:
+                f.unlink()
+                n += 1
+            except OSError:
+                pass
+    return n
 
 
 @lru_cache(maxsize=1)
