@@ -28,8 +28,9 @@ from numba import njit, prange
 from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
 from src.decoders.cube3d.local import Cube3DLocal, Cube3DLocalConfig, local_shot, local_work
-from src.decoders.cube3d.union_find import (CHUNK, UnionFind3D, UnionFind3DConfig, _uf_shot,
-                                            bits_to_bool, uf_decode_shot_reference, uf_work)
+from src.decoders.cube3d.union_find import (CHUNK, UnionFind3D, UnionFind3DConfig, _uf_correlated_shot,
+                                            _uf_shot, bits_to_bool, uf_correlated_shot_reference,
+                                            uf_decode_shot_reference, uf_work)
 
 GATES = ("whole_shot", "partial")
 BACKENDS = ("reference", "numba")
@@ -42,7 +43,9 @@ class HierarchicalConfig:
     K: int | None = None          # None -> DEFAULT_K[gate] (None there = no cap)
     backend: str = "numba"
     strict_r1: bool = False       # fast-path R1 pairs must be isolated within distance 2
-    uf: UnionFind3DConfig = field(default_factory=UnionFind3DConfig)
+    # Deep tier: correlated two-pass UF by default (item 4: it beats plain PyMatching's accuracy
+    # at d = 7/9 at about 2x its single-thread time). UnionFind3DConfig() gives plain UF.
+    uf: UnionFind3DConfig = field(default_factory=lambda: UnionFind3DConfig(correlated=True))
 
     def __post_init__(self) -> None:
         if self.gate not in GATES:
@@ -81,11 +84,23 @@ class HierarchicalResult:
         return float(self.cleared.sum()) / tot if tot else 0.0
 
 
+@njit(cache=True)
+def _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw, correlated,
+          cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep):
+    """The deep tier on one shot: plain or correlated two-pass UF."""
+    if correlated:
+        return _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
+                                   smallest, uw, cptr, cidx, clen, ccredit, len2, mod, inside, keep,
+                                   stat_keep)
+    return _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw)
+
+
 @njit(parallel=True, cache=True)
 def _hier_batch(dets, K, partial, strict_r1,
                 nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
-                out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size):
+                out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size,
+                correlated, cptr, cidx, clen, ccredit):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -93,6 +108,11 @@ def _hier_batch(dets, K, partial, strict_r1,
     nchunk = (S + CHUNK - 1) // CHUNK
     for ci in prange(nchunk):
         uw = uf_work(n, E)
+        len2 = length.copy()
+        mod = np.empty(E, np.int32)
+        inside = np.zeros(E, np.bool_)
+        keep = np.empty(n + 1, np.int32)
+        stat_keep = np.zeros(1, np.int32)
         lw = local_work(n, n_colors)
         lit = np.empty(n, np.uint8)
         cl = np.zeros(3, np.int32)
@@ -108,8 +128,8 @@ def _hier_batch(dets, K, partial, strict_r1,
                 out_fast[s] = True
                 continue
             if c > K:
-                b, ok = _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                                 smallest, uw)
+                b, ok = _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                              uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = b
                 out_uf[s] = True
                 out_ok[s] = ok
@@ -127,12 +147,12 @@ def _hier_batch(dets, K, partial, strict_r1,
                 continue
             out_uf[s] = True
             if partial:
-                b, ok = _uf_shot(lit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                                 smallest, uw)
+                b, ok = _deep(lit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                              uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = bl ^ b
             else:
-                b, ok = _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                                 smallest, uw)
+                b, ok = _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                              uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = uw[18][0]
@@ -178,7 +198,8 @@ class Hierarchical:
             _hier_batch(dets, K, gate == "partial", self.config.strict_r1,
                         g.nbr, g.nbr_edge, lt.ball2, g.boundary_edge, lt.color, lt.n_colors,
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
-                        g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size)
+                        g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size,
+                        self.config.uf.correlated, ut.corr_ptr, ut.corr_idx, ut.corr_len, ut.corr_credit)
         else:
             bits, fast, uf_called, cleared, ok, size = self._run_reference(dets, K, gate)
             lit_count = dets.sum(axis=1, dtype=np.int32)
@@ -199,7 +220,8 @@ class Hierarchical:
         for s in np.flatnonzero(uf_called):
             row = loc.residual[s] if gate == "partial" else dets[s]
             st: dict = {}
-            b, _, good = uf_decode_shot_reference(g, self.uf.tables, np.asarray(row, np.uint8), st)
+            deep = uf_correlated_shot_reference if self.config.uf.correlated else uf_decode_shot_reference
+            b, _, good = deep(g, self.uf.tables, np.asarray(row, np.uint8), st)
             bits[s] = (loc.obs_bits[s] ^ np.uint64(b)) if gate == "partial" else np.uint64(b)
             ok[s] = good
             size[s] = st["max_cluster"]

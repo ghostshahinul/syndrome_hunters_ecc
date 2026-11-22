@@ -10,7 +10,7 @@ numba decoders (UnionFind3D, Hierarchical) run on `threads` threads (default 1, 
 comparison with single-threaded PyMatching). The machine fingerprint goes into every row.
 
 Default decoders: PyMatching, Correlated PyMatching, PyMatching 2D on flat, UnionFind3D,
-Hierarchical. Cube-Collapse and Hierarchical (partial) can be added with --decoders.
+UF3D correlated, Hierarchical (whose deep tier is UF3D correlated). Cube-Collapse and Hierarchical (partial) can be added with --decoders.
 
 CLI:  python -m src.operating_point --distances 3 5 7 9 --p 0.005 --shots 50000 --batches 5
 Each run writes results/operating_point/operating_point_run<N>.csv and .png, with N
@@ -95,7 +95,7 @@ def implemented_registry_decoders() -> dict[str, Callable[[stim.DetectorErrorMod
 
 
 OPERATING_POINT_DECODERS = ("PyMatching", "Correlated PyMatching", "PyMatching 2D on flat",
-                            "UnionFind3D", "Hierarchical")
+                            "UnionFind3D", "UF3D correlated", "Hierarchical")
 
 
 def available_factories() -> dict[str, Callable[[stim.DetectorErrorModel], DecodeFn]]:
@@ -146,7 +146,7 @@ class OperatingPoint:
     git_commit: str = ""
 
 
-NUMBA_DECODERS = {"UnionFind3D", "Hierarchical", "Hierarchical (partial)"}
+NUMBA_DECODERS = {"UnionFind3D", "UF3D correlated", "UF3D ensemble", "Hierarchical", "Hierarchical (partial)"}
 
 
 def measure(distances=(3, 5, 7, 9), p: float = 0.005, shots: int = 50_000, seed: int = 0,

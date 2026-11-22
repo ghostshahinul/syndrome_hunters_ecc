@@ -35,7 +35,7 @@ import stim
 from src.circuits import detector_error_model, surface_code_circuit
 from src.decoders.cube3d.graph import build_detector_graph
 from src.decoders.cube3d.hierarchical import Hierarchical, HierarchicalConfig
-from src.decoders.cube3d.union_find import UnionFind3D, set_threads
+from src.decoders.cube3d.union_find import UnionFind3D, UnionFind3DConfig, set_threads
 from src.figures import (plot_accuracy_runtime, plot_cube_collapse_story, plot_fast_path_fraction,
                          plot_sweep, plot_thread_scaling, save_figure, timestamp, write_rows)
 from src.machine import fingerprint
@@ -56,8 +56,8 @@ def _baseline(name: str) -> Callable[[stim.DetectorErrorModel], Prepared]:
     return lambda dem: Prepared(DECODER_FACTORIES[name](dem))
 
 
-def _uf(dem: stim.DetectorErrorModel) -> Prepared:
-    eng = UnionFind3D(build_detector_graph(dem))
+def _uf(dem: stim.DetectorErrorModel, correlated: bool = False) -> Prepared:
+    eng = UnionFind3D(build_detector_graph(dem), UnionFind3DConfig(correlated=correlated))
     return Prepared(lambda d: eng.run(d).predictions, numba=True)
 
 
@@ -75,6 +75,7 @@ ENTRIES: dict[str, Callable[[stim.DetectorErrorModel], Prepared]] = {
     "Correlated PyMatching": _baseline("Correlated PyMatching"),
     "PyMatching 2D on flat": _baseline("PyMatching 2D on flat"),
     "UnionFind3D": _uf,
+    "UF3D correlated": lambda dem: _uf(dem, correlated=True),
     "Hierarchical": _hier("whole_shot"),
     "Hierarchical (partial)": _hier("partial"),
 }
@@ -199,7 +200,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--sweep-ps", type=float, nargs="+", default=[0.001, 0.002, 0.003, 0.005, 0.008])
     ap.add_argument("--sweep-shots", type=int, default=100_000)
     ap.add_argument("--sweep-decoders", nargs="+",
-                    default=["PyMatching", "Correlated PyMatching", "UnionFind3D", "Hierarchical", "Cube-Collapse"])
+                    default=["PyMatching", "Correlated PyMatching", "UnionFind3D", "UF3D correlated",
+                             "Hierarchical", "Cube-Collapse"])
     ap.add_argument("--thread-distances", type=int, nargs="+", default=[7, 9])
     ap.add_argument("--thread-shots", type=int, default=100_000)
     args = ap.parse_args(argv)

@@ -8,7 +8,7 @@ from src.decoders import DECODERS
 from src.decoders.cube3d.graph import detector_graph
 from src.decoders.cube3d.hierarchical import GATES, Hierarchical, HierarchicalConfig
 from src.decoders.cube3d.local import RULES, Cube3DLocal, Cube3DLocalConfig
-from src.decoders.cube3d.union_find import UnionFind3D
+from src.decoders.cube3d.union_find import UnionFind3D, UnionFind3DConfig
 
 TIER_P = {"code_capacity": 0.05, "phenomenological": 0.01, "circuit": 0.005}
 
@@ -53,12 +53,14 @@ def test_local_numba_rejects_record_flips():
 
 
 # ---- Hierarchical ------------------------------------------------------------------------
+@pytest.mark.parametrize("correlated", [True, False])
 @pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("gate", GATES)
 @pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
-def test_hierarchical_numba_bit_identical(tier, d, gate, strict):
+def test_hierarchical_numba_bit_identical(tier, d, gate, strict, correlated):
     g = detector_graph(tier, d, TIER_P[tier])
-    h = Hierarchical(g, HierarchicalConfig(gate=gate, strict_r1=strict))
+    h = Hierarchical(g, HierarchicalConfig(gate=gate, strict_r1=strict,
+                                           uf=UnionFind3DConfig(correlated=correlated)))
     dets, _ = sample(tier, d, 300, seed=21 + d)
     ref = h.run(dets, backend="reference")
     fast = h.run(dets, backend="numba")
@@ -83,7 +85,7 @@ def test_whole_shot_gate_routes_rejected_shots_to_uf_unchanged(tier):
     h = Hierarchical(g, HierarchicalConfig(gate="whole_shot", K=6))
     dets, _ = sample(tier, d, 3000, seed=3)
     res = h.run(dets)
-    uf = UnionFind3D(g).run(dets)
+    uf = UnionFind3D(g, h.config.uf).run(dets)
     loc = Cube3DLocal(g).run(dets, K=6, backend="numba")
     np.testing.assert_array_equal(res.fast, loc.accepted)
     np.testing.assert_array_equal(res.predictions[~res.fast], uf.predictions[~res.fast])
@@ -99,7 +101,7 @@ def test_partial_gate_is_local_xor_uf_on_residual(tier):
     dets, _ = sample(tier, d, 3000, seed=4)
     res = h.run(dets)
     loc = Cube3DLocal(g).run(dets, K=g.n_det, record_residual=True, backend="numba")
-    uf = UnionFind3D(g).run(loc.residual)
+    uf = UnionFind3D(g, h.config.uf).run(loc.residual)
     from src.decoders.cube3d.union_find import bits_to_bool
     expect = bits_to_bool(loc.obs_bits, g.n_obs) ^ uf.predictions
     np.testing.assert_array_equal(res.predictions, expect)
@@ -111,8 +113,9 @@ def test_partial_gate_is_local_xor_uf_on_residual(tier):
 def test_K0_equals_uf_alone(tier, gate):
     g = detector_graph(tier, 5, TIER_P[tier])
     dets, _ = sample(tier, 5, 2000, seed=6)
-    res = Hierarchical(g, HierarchicalConfig(gate=gate, K=0)).run(dets)
-    np.testing.assert_array_equal(res.predictions, UnionFind3D(g).run(dets).predictions)
+    h = Hierarchical(g, HierarchicalConfig(gate=gate, K=0))
+    res = h.run(dets)
+    np.testing.assert_array_equal(res.predictions, UnionFind3D(g, h.config.uf).run(dets).predictions)
     assert res.cleared.sum() == 0
 
 

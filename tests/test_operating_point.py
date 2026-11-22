@@ -6,7 +6,7 @@ Each point: 3 independent batches of 50,000 shots (override with `pytest --op-ba
 --op-shots N`); LER pooled over the batches, time = mean batch µs/shot with the fastest
 and slowest batch as horizontal whiskers. numba decoders run on 1 thread.
 Decoders: PyMatching, Correlated PyMatching, PyMatching 2D on Cube-Collapse's flat
-syndrome, UnionFind3D, Hierarchical.
+syndrome, UnionFind3D, UF3D correlated, Hierarchical (deep tier: UF3D correlated).
 """
 
 import pytest
@@ -55,7 +55,8 @@ def test_reference_decoders_improve_with_distance(operating_points):
     assert ler[("PyMatching", 7)].ler < ler[("PyMatching", 3)].ler
 
 
-@pytest.mark.parametrize("decoder", ["PyMatching", "Correlated PyMatching", "UnionFind3D", "Hierarchical"])
+@pytest.mark.parametrize("decoder", ["PyMatching", "Correlated PyMatching", "UnionFind3D", "UF3D correlated",
+                                     "Hierarchical"])
 def test_distance_9_improves_on_distance_7(operating_points, decoder):
     """d = 9: every 3D decoder is better than at d = 7, with non-overlapping 95% intervals."""
     ler = _ler(operating_points)
