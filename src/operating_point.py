@@ -235,14 +235,11 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
         for r in pts:
             color, marker = style[r.decoder]
             y = 100 * r.ler
-            xerr = None
-            if r.batches > 1:
-                xerr = [[r.us_per_shot - r.us_min], [r.us_max - r.us_per_shot]]
             ax.errorbar(r.us_per_shot, y, yerr=[[y - 100 * r.ler_low], [100 * r.ler_high - y]],
-                        xerr=xerr, fmt=marker, color=color, ms=9, mec=SURFACE, mew=1.5,
+                        fmt=marker, color=color, ms=9, mec=SURFACE, mew=1.5,
                         elinewidth=2, capsize=4, capthick=2, zorder=3)
         ax.set_title(f"Distance {d}", fontsize=14, color=INK, pad=10)
-        ax.set_xlim(0, max(max(r.us_per_shot, r.us_max) for r in pts) * 1.12)
+        ax.set_xlim(0, max(r.us_per_shot for r in pts) * 1.15)
         ax.set_xlabel("Batch time per shot (µs)", fontsize=12, color=INK_2)
         ax.grid(True, axis="y", color=GRID, lw=0.8, zorder=0)
         for side in ("top", "right"):
@@ -265,8 +262,7 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
     fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.055, 0.875), ncol=len(decoders),
                frameon=False, fontsize=12, handlelength=2.2, columnspacing=2.2)
     numba_threads = sorted({r.threads for r in rows if r.backend == "numba"})
-    batch_note = (f" Time = mean over {first.batches} batches; horizontal whiskers span the fastest "
-                  f"and slowest batch." if first.batches > 1 else "")
+    batch_note = f" Time = mean over {first.batches} batches." if first.batches > 1 else ""
     meta = {"cpu": first.cpu or None, "power": first.power, "git_commit": first.git_commit,
             "threads_note": (f"numba decoders on {numba_threads[-1]} thread(s), PyMatching 1 thread"
                              if numba_threads else "")}
@@ -361,8 +357,8 @@ DARK_COLORS = {"PyMatching": "#ff8a4c", "Correlated PyMatching": "#3ddc97", "Uni
 
 def plot_operating_point_dark(rows: list[OperatingPoint], path: Path, run_number: int | None = None,
                               title: str = "Every team decoder on the same shots") -> Path:
-    """Dark-theme slide version of the operating-point figure: same data and layout (x = batch
-    time per shot, y = failure %, 95% Wilson whiskers, batch-spread x whiskers), larger type."""
+    """Dark-theme slide version of the operating-point figure: x = batch time per shot (mean over
+    batches), y = logical failure %, with 95% Wilson whiskers; larger type."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -380,13 +376,12 @@ def plot_operating_point_dark(rows: list[OperatingPoint], path: Path, run_number
         for r in pts:
             color = DARK_COLORS.get(r.decoder, DARK["ink2"])
             y = 100 * r.ler
-            xerr = [[r.us_per_shot - r.us_min], [r.us_max - r.us_per_shot]] if r.batches > 1 else None
             big = r.decoder == "Hierarchical"
-            ax.errorbar(r.us_per_shot, y, yerr=[[y - 100 * r.ler_low], [100 * r.ler_high - y]], xerr=xerr,
+            ax.errorbar(r.us_per_shot, y, yerr=[[y - 100 * r.ler_low], [100 * r.ler_high - y]],
                         fmt=style_for(r.decoder).marker, color=color, ms=14 if big else 11, mec=DARK["panel"],
                         mew=1.5, elinewidth=2.2, capsize=5, capthick=2.2, zorder=4 if big else 3)
         ax.set_title(f"Distance {d}", fontsize=20, color=DARK["ink"], pad=12)
-        ax.set_xlim(0, max(max(r.us_per_shot, r.us_max) for r in pts) * 1.12)
+        ax.set_xlim(0, max(r.us_per_shot for r in pts) * 1.15)
         ax.set_xlabel("Batch time per shot (µs)", fontsize=17, color=DARK["ink2"])
         ax.grid(True, color=DARK["grid"], lw=0.9, zorder=0)
         for side in ("top", "right"):
@@ -406,8 +401,9 @@ def plot_operating_point_dark(rows: list[OperatingPoint], path: Path, run_number
                fontsize=16, handletextpad=0.4, columnspacing=1.8, labelcolor=DARK["ink"])
     meta = {"cpu": first.cpu or None, "power": first.power, "git_commit": first.git_commit,
             "threads_note": "every decoder single-thread (PyMatching too)"}
-    fig.text(0.045, 0.02, "Lower and further left is better. Whiskers: 95% Wilson interval (vertical), fastest–slowest "
-             "batch (horizontal). FaultJoin is a teammate decoder (branch shahi_2).\n" + machine_line(meta),
+    fig.text(0.045, 0.02, "Lower and further left is better. x = batch time per shot (mean over "
+             f"{first.batches} batches); y = logical failures, whiskers = 95% Wilson interval. "
+             "FaultJoin is a teammate decoder (branch shahi_2).\n" + machine_line(meta),
              fontsize=12.5, color=DARK["ink2"], linespacing=1.5)
     fig.subplots_adjust(left=0.06, right=0.985, top=0.71, bottom=0.2, wspace=0.12)
     path.parent.mkdir(parents=True, exist_ok=True)
