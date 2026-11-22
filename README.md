@@ -1,5 +1,7 @@
 # Syndrome Hunters surface-code decoders
 
+The `shahi_cp` branch includes a packed correlated PyMatching decoder, a separate Sparse Blossom C++ build, and a benchmark through distance 11. [Fast correlated PyMatching results and instructions](results/fast_correlated_pymatching/README.md)
+
 ## NVIDIA Ising hybrid experiment
 
 We built a surface-code decoder that restores measured boundary checks after NVIDIA's pretrained Fast R9 predecoder, then applies correlated PyMatching. The CNN predicts local corrections and a logical frame. The matcher decodes the residual syndrome, and the decoder XORs the two logical predictions. The two reference hybrids use the published residual with either ordinary or correlated matching. [Implementation](src/decoders/ising.py) · [Architecture, installation and exact commands](docs/ising.md)

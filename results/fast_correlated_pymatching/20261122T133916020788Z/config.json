@@ -1,0 +1,64 @@
+{
+  "distances": [
+    3,
+    5,
+    7,
+    9,
+    11
+  ],
+  "ps": [
+    0.001,
+    0.003,
+    0.005,
+    0.007,
+    0.01
+  ],
+  "shots": 50000,
+  "basis": "z",
+  "seed": 20261121,
+  "batch_size": 4096,
+  "repeats": 3,
+  "latency_shots": 256,
+  "workers": 4,
+  "variants": [
+    "mwpm",
+    "correlated",
+    "packed",
+    "native_control",
+    "fast_serial",
+    "fast_parallel"
+  ],
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "cpu": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+  "physical_cores": 6,
+  "logical_cores": 12,
+  "versions": {
+    "stim": "1.16.0",
+    "pymatching": "2.4.0",
+    "numpy": "2.5.5",
+    "psutil": "7.2.2",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2"
+  },
+  "native_build": {
+    "pymatching": "6f63b2b9474ba0fa7e511fe52bffdce858a06984",
+    "stim": "1320ad7eac7de34d2e9c70daa44fbc6d84174450",
+    "compiler": "clang version 19.1.6 (https://github.com/llvm/llvm-project.git e21dc4bd5474d04b8e62d7331362edcc5648d7e5)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "flags": [
+      "-std=c++20",
+      "-O3",
+      "-fno-strict-aliasing",
+      "-ffunction-sections",
+      "-fdata-sections"
+    ],
+    "link_flags": [
+      "-shared",
+      "-Wl,--gc-sections",
+      "-static"
+    ],
+    "kernel_sha256": "0fee644d103ac046fda45a5921dc492269d9296b09d0521f71ab88575747ede4",
+    "binary_sha256": "b3fae87e219791edf366a0fbe9989bf2a73d4b2d061cb8e83d9f105e788812b4"
+  }
+}

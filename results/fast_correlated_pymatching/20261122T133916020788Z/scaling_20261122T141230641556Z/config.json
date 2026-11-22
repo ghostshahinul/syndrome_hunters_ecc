@@ -1,0 +1,9 @@
+{
+  "parent": "20261122T133916020788Z",
+  "workers": [
+    6,
+    12
+  ],
+  "matched_control_workers": 4,
+  "seed": 20261121
+}

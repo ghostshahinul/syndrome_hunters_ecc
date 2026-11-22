@@ -1,0 +1,5 @@
+The Sparse Blossom prediction and profiling paths in kernel.cc and detail.cc are
+adapted from PyMatching's mwpm_decoding.cc, Copyright 2022 PyMatching
+Contributors, under the Apache License, Version 2.0 (LICENSE-PyMatching).
+The adaptation adds a packed C ABI, an optimized prediction-only second pass,
+worker-local buffers, and stage instrumentation.
