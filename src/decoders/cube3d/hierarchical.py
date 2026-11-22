@@ -1,16 +1,25 @@
-"""Hierarchical: Cube3D-Local fast path + UnionFind3D deep tier on the shared 3D graph.
+"""Hierarchical: five stages on the shared 3D detector graph, cheapest first.
 
-Per shot (lit = number of detection events):
-  lit == 0                -> predict no flip.
-  lit > K                 -> UnionFind3D on the whole shot.
-  otherwise apply the local rules R1-R3 (Cube3D-Local), then
-    every event cleared   -> fast-path prediction (UF never runs on this shot).
-    gate="whole_shot"     -> discard the local work; UnionFind3D on the whole shot.
-    gate="partial"        -> UnionFind3D on the residual events; prediction =
-                             local bits XOR UF bits.
+Per shot (lit = number of detection events), with the defaults (gate="whole_shot", K=6,
+table=True, deep tier = correlated UF with the auto pass-2 gate):
+  1. Empty shot           lit == 0 -> predict no flip.
+  2. Single-fault table   1 <= lit <= 4 and the syndrome is exactly one DEM fault's ->
+                          that fault's observable flip (exact lookup; no match -> go on).
+  3. Cube3D-Local         lit <= K: apply the local rules R1-R3. Every event cleared ->
+     fast path            fast-path prediction, UF never runs. Otherwise the whole-shot
+                          gate discards the local work and the shot goes to stage 4
+                          (lit > K skips the rules and goes straight to stage 4).
+  4. Correlated UF,       weighted union-find on the whole shot with the base edge lengths.
+     pass 1
+  5. Correlated UF,       reweight the partners of pass 1's correction from the DEM's
+     pass 2              joint probabilities and run UF again, keeping pass 2 only if its
+                          correlated score is strictly lower. It runs only if pass 1's
+                          largest cluster has more than floor(rounds^2 / 6.5) nodes, and is
+                          skipped exactly (same output) when no shortened edge touches a
+                          node pass 1 visited.
 
-K defaults to 6 for whole_shot (only small shots can be fully cleared) and to "no cap"
-for partial (the rules run on every shot and strip off isolated groups).
+gate="partial" (registry name hierarchical_partial) instead sends only the events the local
+rules left to UF and XORs the local and UF bits; there K defaults to "no cap".
 
 Backends:
   numba      one fused prange kernel over shots (local rules, gate and UF in one pass).
