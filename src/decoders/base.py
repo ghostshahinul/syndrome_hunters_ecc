@@ -18,6 +18,8 @@ import stim
 
 class Decoder(ABC):
     name: str = "abstract"
+    # True for pure-Python decoders (ms per shot): generic speed/accuracy tests use fewer shots.
+    slow: bool = False
 
     def __init__(self, dem: stim.DetectorErrorModel):
         self.dem = dem

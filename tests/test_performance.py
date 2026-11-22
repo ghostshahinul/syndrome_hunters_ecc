@@ -22,6 +22,7 @@ DISTANCES = [3, 5, 7]
 P = 0.005
 SHOTS = 10_000
 REPEATS = 3
+SLOW_SHOTS = 500  # decoders with Decoder.slow (pure-Python MWPM): fewer shots, one timing
 
 
 def best_time(fn, repeats=REPEATS):
@@ -57,15 +58,16 @@ def test_decode_speed(report, name, distance):
     circuit = surface_code_circuit(distance, P)
     dem = detector_error_model(circuit)
     decoder = build_or_skip(DECODERS[name], dem)
-    dets, _ = circuit.compile_detector_sampler(seed=0).sample(SHOTS, separate_observables=True)
+    shots = SLOW_SHOTS if DECODERS[name].slow else SHOTS
+    dets, _ = circuit.compile_detector_sampler(seed=0).sample(shots, separate_observables=True)
 
     t_init, _ = best_time(lambda: DECODERS[name](dem))
-    t_decode, pred = best_time(lambda: decoder.decode_batch(dets))
+    t_decode, pred = best_time(lambda: decoder.decode_batch(dets), repeats=1 if DECODERS[name].slow else REPEATS)
 
     x = f"d={distance}"
-    report.add("decode_speed", name, x, 1e6 * t_decode / SHOTS,
+    report.add("decode_speed", name, x, 1e6 * t_decode / shots,
                ylabel=f"µs per shot (p={P:g}, best of 3)", log=True)
     report.add("decoder_init_time", name, x, t_init, ylabel="seconds to build decoder", log=True)
 
-    assert pred.shape == (SHOTS, dem.num_observables)
+    assert pred.shape == (shots, dem.num_observables)
     assert np.isfinite(t_decode)

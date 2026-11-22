@@ -7,6 +7,7 @@ Every LER measured here is plotted to results/tests/<run>/ler_vs_baseline.png.
 
 import math
 from functools import lru_cache
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -28,6 +29,7 @@ KNOWN_GAPS = {
 }
 CASES = [(3, 0.005), (5, 0.005)]
 SHOTS = 20_000
+SLOW_SHOTS = 5_000  # decoders with Decoder.slow: compared with the baseline on the first 5k shots
 
 
 @lru_cache(maxsize=None)
@@ -65,7 +67,12 @@ def test_baseline_ler_sane(report, distance, p):
 def test_ler_close_to_baseline(report, name, distance, p):
     dem, s = setup_case(distance, p)
     candidate = build_or_skip(DECODERS[name], dem)
-    ler_base, err_base = baseline_ler(distance, p)
+    if DECODERS[name].slow:
+        s = SimpleNamespace(detection_events=s.detection_events[:SLOW_SHOTS],
+                            observable_flips=s.observable_flips[:SLOW_SHOTS], shots=SLOW_SHOTS)
+        ler_base, err_base = ler_and_stderr(PyMatchingDecoder(dem), s)
+    else:
+        ler_base, err_base = baseline_ler(distance, p)
     ler_cand, err_cand = ler_and_stderr(candidate, s)
     record(report, name, distance, p, ler_cand, err_cand)
     if name in KNOWN_GAPS and ler_cand > 1.5 * ler_base + 3 * err_base:

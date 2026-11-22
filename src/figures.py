@@ -58,6 +58,9 @@ STYLES: dict[str, Style] = {
     "Hierarchical":           Style("#008300", "P"),
     "Hierarchical (partial)": Style("#6250d6", "X"),
     "Cube3D-Local":           Style("#e34948", "*"),
+    # The 8 palette slots are used up; the two MWPM series take neutral inks + unique markers.
+    "MWPM3D":                 Style("#52514e", "h"),
+    "Hierarchical + MWPM":    Style("#0b0b0b", "p"),
 }
 FALLBACK = Style(MUTED, "o")
 
@@ -69,6 +72,8 @@ DISPLAY_NAMES = {
     "hierarchical": "Hierarchical",
     "hierarchical_partial": "Hierarchical (partial)",
     "cube3d_local": "Cube3D-Local",
+    "mwpm_3d": "MWPM3D",
+    "hierarchical_mwpm": "Hierarchical + MWPM",
 }
 
 # ordinal ramp for distance (sequential blue, steps 250 -> 700), plus a marker per d

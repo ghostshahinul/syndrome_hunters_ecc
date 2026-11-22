@@ -62,7 +62,7 @@ def test_hierarchical_numba_bit_identical(tier, d, gate, strict):
     dets, _ = sample(tier, d, 300, seed=21 + d)
     ref = h.run(dets, backend="reference")
     fast = h.run(dets, backend="numba")
-    for f in ("predictions", "fast", "uf_called", "lit_count", "cleared", "ok"):
+    for f in ("predictions", "fast", "uf_called", "lit_count", "cleared", "ok", "max_cluster"):
         np.testing.assert_array_equal(getattr(fast, f), getattr(ref, f), err_msg=f)
 
 

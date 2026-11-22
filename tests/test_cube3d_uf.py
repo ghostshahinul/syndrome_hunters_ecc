@@ -83,6 +83,8 @@ def test_numba_bit_identical_to_reference(tier, d):
     np.testing.assert_array_equal(fast.predictions, ref.predictions)
     np.testing.assert_array_equal(fast.correction, ref.correction)
     np.testing.assert_array_equal(fast.ok, ref.ok)
+    np.testing.assert_array_equal(fast.max_cluster, ref.max_cluster)
+    assert (fast.max_cluster >= (dets.sum(axis=1) > 0)).all()
 
 
 def test_lengths_are_small_integers():

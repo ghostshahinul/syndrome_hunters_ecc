@@ -61,6 +61,7 @@ class HierarchicalResult:
     lit_count: np.ndarray     # (shots,) int32
     cleared: np.ndarray       # (shots,) int32 events cleared by the local rules
     ok: np.ndarray            # (shots,) bool: UF peeled every defect (True where UF not called)
+    max_cluster: np.ndarray | None = None  # (shots,) int32 largest UF cluster (0 if UF not called)
 
     @property
     def fast_fraction(self) -> float:
@@ -84,7 +85,7 @@ class HierarchicalResult:
 def _hier_batch(dets, K, partial, strict_r1,
                 nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
-                out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit):
+                out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -112,6 +113,7 @@ def _hier_batch(dets, K, partial, strict_r1,
                 out_bits[s] = b
                 out_uf[s] = True
                 out_ok[s] = ok
+                out_size[s] = uw[18][0]
                 continue
             cl[0] = 0
             cl[1] = 0
@@ -133,6 +135,7 @@ def _hier_batch(dets, K, partial, strict_r1,
                                  smallest, uw)
                 out_bits[s] = b
             out_ok[s] = ok
+            out_size[s] = uw[18][0]
 
 
 class Hierarchical:
@@ -169,16 +172,18 @@ class Hierarchical:
         cleared = np.zeros(S, np.int32)
         ok = np.ones(S, bool)
         lit_count = np.zeros(S, np.int32)
+        size = np.zeros(S, np.int32)
         if backend == "numba":
             lt, ut = self.local.tables, self.uf.tables
             _hier_batch(dets, K, gate == "partial", self.config.strict_r1,
                         g.nbr, g.nbr_edge, lt.ball2, g.boundary_edge, lt.color, lt.n_colors,
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
-                        g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count)
+                        g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size)
         else:
-            bits, fast, uf_called, cleared, ok = self._run_reference(dets, K, gate)
+            bits, fast, uf_called, cleared, ok, size = self._run_reference(dets, K, gate)
             lit_count = dets.sum(axis=1, dtype=np.int32)
-        return HierarchicalResult(bits_to_bool(bits, g.n_obs), fast, uf_called, lit_count, cleared, ok)
+        return HierarchicalResult(bits_to_bool(bits, g.n_obs), fast, uf_called, lit_count, cleared, ok,
+                                  size)
 
     def _run_reference(self, dets, K, gate):
         g = self.graph
@@ -190,12 +195,15 @@ class Hierarchical:
         uf_called = ~fast
         cleared = sum(loc.cleared.values()).astype(np.int32)
         ok = np.ones(S, bool)
+        size = np.zeros(S, np.int32)
         for s in np.flatnonzero(uf_called):
             row = loc.residual[s] if gate == "partial" else dets[s]
-            b, _, good = uf_decode_shot_reference(g, self.uf.tables, np.asarray(row, np.uint8))
+            st: dict = {}
+            b, _, good = uf_decode_shot_reference(g, self.uf.tables, np.asarray(row, np.uint8), st)
             bits[s] = (loc.obs_bits[s] ^ np.uint64(b)) if gate == "partial" else np.uint64(b)
             ok[s] = good
-        return bits, fast, uf_called, cleared, ok
+            size[s] = st["max_cluster"]
+        return bits, fast, uf_called, cleared, ok, size
 
 
 class HierarchicalDecoder(Decoder):

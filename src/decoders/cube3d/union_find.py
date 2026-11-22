@@ -79,9 +79,10 @@ def build_uf_tables(g: DetectorGraph3D, scale: int = 4, growth: str = "all") -> 
 
 
 # ---- reference (idiomatic Python) -------------------------------------------------------
-def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarray
-                             ) -> tuple[int, list[int], bool]:
-    """Decode one shot. Returns (observable bits, sorted flipped edge ids, ok)."""
+def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarray,
+                             stats: dict | None = None) -> tuple[int, list[int], bool]:
+    """Decode one shot. Returns (observable bits, sorted flipped edge ids, ok).
+    If `stats` is given, stats["max_cluster"] = node count of the largest final cluster."""
     n, B = g.n_det, g.n_det
     lit = [int(v) for v in np.flatnonzero(dets_row)]
     parent: dict[int, int] = {}
@@ -199,6 +200,8 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
                 defect ^= {p}
     if defect:
         ok = False
+    if stats is not None:
+        stats["max_cluster"] = max((size[find(v)] for v in parent), default=0)
     bits = 0
     for e in flipped:
         bits ^= int(g.edge_obs_bits[e])
@@ -243,13 +246,14 @@ def uf_work(n, E):
             np.empty(n + 1, np.int32),           # 14 tree_parent
             np.empty(n, np.int32),               # 15 BFS order
             np.empty(n + 1, np.int32),           # 16 queue
-            np.zeros(n + 1, np.bool_))           # 17 defect
+            np.zeros(n + 1, np.bool_),           # 17 defect
+            np.zeros(1, np.int32))               # 18 out: node count of the largest cluster
 
 
 @njit(cache=True)
 def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work):
     (parent, rank, parity, touches, size, in_cluster, visited, support, grown, newly,
-     active, touched, marked, tree_edge, tree_parent, order, queue, defect) = work
+     active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat) = work
     n = row.shape[0]
     B = n
     D = inc_edge.shape[1]
@@ -261,6 +265,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
             visited[nvis] = v
             nvis += 1
     if nvis == 0:
+        stat[0] = 0
         return np.uint64(0), True
     ntouched = 0
 
@@ -401,6 +406,12 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
             if p != B:
                 defect[p] = not defect[p]
 
+    mx = 0
+    for i in range(nvis):
+        sz = size[_find(parent, visited[i])]
+        if sz > mx:
+            mx = sz
+    stat[0] = mx
     # check and restore the workspace (only touched entries)
     for i in range(nvis):
         v = visited[i]
@@ -425,7 +436,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
 
 @njit(parallel=True, cache=True)
 def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
-              smallest):
+              smallest, out_size):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -437,6 +448,7 @@ def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out
                              smallest, work)
             out_bits[s] = b
             out_ok[s] = ok
+            out_size[s] = work[18][0]
 
 
 def bits_to_bool(bits: np.ndarray, n_obs: int) -> np.ndarray:
@@ -448,6 +460,7 @@ class UFResult:
     predictions: np.ndarray       # (shots, n_obs) bool
     ok: np.ndarray                # (shots,) bool: every defect peeled
     correction: np.ndarray | None  # (shots, E) uint8 if requested
+    max_cluster: np.ndarray | None = None  # (shots,) int32 nodes in the largest final cluster
 
 
 class UnionFind3D:
@@ -469,16 +482,18 @@ class UnionFind3D:
         corr = np.zeros((S, g.n_edges) if record_correction else (0, 0), dtype=np.uint8)
         bits = np.zeros(S, dtype=np.uint64)
         ok = np.ones(S, dtype=bool)
+        size = np.zeros(S, dtype=np.int32)
         if backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
-                      g.edge_obs_bits, corr, bits, ok, t.smallest)
+                      g.edge_obs_bits, corr, bits, ok, t.smallest, size)
         else:
             for s in range(S):
-                b, flipped, good = uf_decode_shot_reference(g, t, dets[s])
-                bits[s], ok[s] = b, good
+                st: dict = {}
+                b, flipped, good = uf_decode_shot_reference(g, t, dets[s], st)
+                bits[s], ok[s], size[s] = b, good, st["max_cluster"]
                 if record_correction:
                     corr[s, flipped] = 1
-        return UFResult(bits_to_bool(bits, g.n_obs), ok, corr if record_correction else None)
+        return UFResult(bits_to_bool(bits, g.n_obs), ok, corr if record_correction else None, size)
 
 
 class UnionFind3DDecoder(Decoder):
