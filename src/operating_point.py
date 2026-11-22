@@ -30,6 +30,7 @@ from src.decoders.cube_collapse import CubeCollapseDecoder
 from src.decoders.cube_collapse.baselines import decode_2d, pymatching_2d
 from src.decoders.cube_collapse.filter import temporal_filter
 from src.decoders.cube_collapse.layout import build_cube
+from src.figures import display_name, style_for
 
 # (label, factory(dem) -> decode(dets) -> predictions). Order = legend + colour order.
 DecodeFn = Callable[[np.ndarray], np.ndarray]
@@ -80,7 +81,7 @@ def implemented_registry_decoders() -> dict[str, Callable[[stim.DetectorErrorMod
             cls(probe_dem).decode_batch(np.zeros((1, probe_dem.num_detectors), dtype=bool))
         except NotImplementedError:
             continue
-        out[name] = lambda dem, cls=cls: cls(dem).decode_batch
+        out[display_name(name)] = lambda dem, cls=cls: cls(dem).decode_batch
     return out
 
 
@@ -136,6 +137,7 @@ def measure(distances=(3, 5, 7), p: float = 0.005, shots: int = 50_000, seed: in
 # ---- plot ------------------------------------------------------------------------------
 # Reference categorical palette, fixed order (dataviz skill, references/palette.md),
 # plus a distinct marker per decoder so identity never relies on colour alone.
+# Per-decoder styles now come from the shared registry in src/figures.py (STYLES).
 SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
 SERIES_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 INK, INK_2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
@@ -149,7 +151,7 @@ def plot_operating_point(rows: list[OperatingPoint], path: Path, run_number: int
 
     decoders = list(dict.fromkeys(r.decoder for r in rows))
     distances = sorted({r.distance for r in rows})
-    style = {name: (SERIES_COLORS[i % 8], SERIES_MARKERS[i % 8]) for i, name in enumerate(decoders)}
+    style = {name: (style_for(name).color, style_for(name).marker) for name in decoders}  # shared registry
     first = rows[0]
 
     fig, axes = plt.subplots(1, len(distances), figsize=(5.4 * len(distances), 5.2),
