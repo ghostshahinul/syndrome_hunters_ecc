@@ -324,3 +324,21 @@ def test_weighted_forest_plain_uf_exact_on_components(tier, d):
 def test_passes_validation():
     with pytest.raises(ValueError):
         UnionFind3DConfig(passes=4)
+
+
+
+# ---- Final round, Step 2: the exact pass-2 skip never changes any output --------------------
+@pytest.mark.parametrize("opts", [dict(), dict(table=True), dict(passes=3), dict(weighted_forest=True)],
+                         ids=lambda o: "+".join(o) or "default")
+@pytest.mark.parametrize("tier,d", CASES)
+def test_pass2_skip_is_exact(tier, d, opts):
+    g = detector_graph(tier, d, TIER_P[tier])
+    dets, _ = sample(tier, d, 1500 if d < 7 else 600, seed=900 + d)
+    on = UnionFind3D(g, UnionFind3DConfig(correlated=True, **opts)).run(dets, record_correction=True)
+    off = UnionFind3D(g, UnionFind3DConfig(correlated=True, pass2_skip=False, **opts)).run(dets,
+                                                                                         record_correction=True)
+    for f in ("predictions", "correction", "ok", "max_cluster"):
+        np.testing.assert_array_equal(getattr(on, f), getattr(off, f), err_msg=f)
+    ref = UnionFind3D(g, UnionFind3DConfig(correlated=True, **opts)).run(dets[:150], record_correction=True,
+                                                                         backend="reference")
+    np.testing.assert_array_equal(on.correction[:150], ref.correction)

@@ -93,12 +93,12 @@ class HierarchicalResult:
 
 @njit(cache=True)
 def _deep(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw, correlated,
-          cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, wforest, slen, scred, passes):
+          cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, wforest, slen, scred, passes, p2skip):
     """The deep tier on the detection events lits[:nlit]: plain or correlated two-pass UF."""
     if correlated:
         return _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
                                    smallest, uw, cptr, cidx, clen, ccredit, len2, mod, inside, keep,
-                                   stat_keep, False, wforest, slen, scred, passes)
+                                   stat_keep, False, wforest, slen, scred, passes, p2skip)
     return _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw,
                     False, wforest)
 
@@ -108,7 +108,8 @@ def _hier_batch(dets, K, partial, strict_r1,
                 nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
                 out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size,
-                correlated, cptr, cidx, clen, ccredit, tkeys, tvals, out_table, wforest, slen, scred, passes):
+                correlated, cptr, cidx, clen, ccredit, tkeys, tvals, out_table, wforest, slen, scred, passes,
+                p2skip):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -141,7 +142,7 @@ def _hier_batch(dets, K, partial, strict_r1,
             if c > K:
                 b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes)
+                              wforest, slen, scred, passes, p2skip)
                 out_bits[s] = b
                 out_uf[s] = True
                 out_ok[s] = ok
@@ -170,12 +171,12 @@ def _hier_batch(dets, K, partial, strict_r1,
             if partial:
                 b, ok = _deep(rlits, nr, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes)
+                              wforest, slen, scred, passes, p2skip)
                 out_bits[s] = bl ^ b
             else:
                 b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes)
+                              wforest, slen, scred, passes, p2skip)
                 out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = uw[18][0]
@@ -227,7 +228,7 @@ class Hierarchical:
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
                         g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size,
                         self.config.uf.correlated, ut.corr_ptr, ut.corr_idx, ut.corr_len, ut.corr_credit,
-                        tkeys, tvals, table, ut.wforest, ut.score_len, ut.score_credit, ut.passes)
+                        tkeys, tvals, table, ut.wforest, ut.score_len, ut.score_credit, ut.passes, ut.p2skip)
         else:
             bits, fast, uf_called, cleared, ok, size, table = self._run_reference(dets, K, gate, use_table)
             lit_count = dets.sum(axis=1, dtype=np.int32)

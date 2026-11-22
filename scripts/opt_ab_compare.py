@@ -62,6 +62,9 @@ CONFIGS = {
     "ufc_s16": _uf(correlated=True, table=True, scale=16, skip_ahead=True),
     "ufc_s8_rr": _uf(correlated=True, table=True, scale=8),
     "hier_partial": _h(gate="partial"),
+    # final round
+    "ufc_noskip": _uf(correlated=True, table=True, pass2_skip=False),
+    "hier_noskip": _h(uf=UnionFind3DConfig(correlated=True, pass2_skip=False)),
     **{f"hier_K{k}": _h(K=k) for k in range(2, 11)},
 }
 

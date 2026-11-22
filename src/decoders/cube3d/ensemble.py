@@ -91,7 +91,7 @@ def _multi_work(M, n, E):
             np.empty((M, n), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, n + 1), np.bool_),
             np.zeros((M, 1), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, 1), np.int32),
             np.zeros((M, E), np.int32), np.empty((M, E), np.int32), np.zeros((M, n + 1), np.int32),
-            np.empty((M, E), np.int32), np.empty((M, n), np.int32), np.empty((M, n), np.int32),
+            np.empty((M, E), np.int32), np.zeros((M, n), np.int32), np.empty((M, n), np.int32),
             np.empty((M, n + 1), np.int32), np.empty((M, E), np.int64), np.zeros((M, E), np.bool_))
 
 
@@ -111,7 +111,8 @@ def _variant(lits, nlit, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, 
     if correlated:
         b, ok = _uf_correlated_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits,
                                     none, smallest[v], work, cptr, cidx, clen, ccredit, len2[v], mod[v],
-                                    inside[v], keep[v], stat_keep[v], False, False, lengths[v], ccredit, 2)
+                                    inside[v], keep[v], stat_keep[v], False, False, lengths[v], ccredit, 2,
+                                    True)
     else:
         b, ok = _uf_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits, none,
                          smallest[v], work)

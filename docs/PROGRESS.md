@@ -881,3 +881,24 @@ come from the instrumented reference, which is bit-identical to numba (new count
 - **The real lever is Step 3:** a cheap predictor that finds the about 0.6% of shots where pass 2
   matters. The best possible gate would cut Hierarchical to about pass 1 + local ≈ 0.98× PyMatching
   (d=7) and 0.97× (d=9).
+
+Step 1 commit: `d98284e` (branch).
+
+## Step 2: exact pass-2 skip (branch, 01:46 to 01:49)
+- **Rule:** in `_uf_correlated_shot` and in the reference, pass 2 is skipped when no shortened partner
+  edge has an endpoint (the boundary excluded) among pass 1's visited nodes. Growth only touches edges
+  incident to visited nodes, so pass 2 would replay pass 1 exactly.
+- **Mechanics:** `_uf_shot` now always records its visited count (`work[23][0]`), and workspace slot 25
+  is the node marker. The config flag is `pass2_skip`, default **True**.
+- **Exactness, tested:** the saved golden outputs are unchanged. On vs off is identical (predictions,
+  corrections, ok, max_cluster) on 3 tiers × d = 3/5/7, with the default options, table, passes=3 and
+  weighted forest; also in Hierarchical (both gates). numba equals the reference.
+- **Skip rate** (Step 1): 22.2% of shots at d=5, 1.5% at d=7, 0.01% at d=9.
+- **Speedup** (`results/optimization/final_step2_20261122_014842.csv`, 250k shots, single thread):
+
+  | d | UF3D correlated: off → on | Hierarchical: off → on | PyMatching |
+  |---|---|---|---|
+  | 5 | 6.02 → 5.81 µs (−3.5%) | 5.84 → 5.74 (−1.7%) | 2.48 |
+  | 7 | 17.08 → 17.07 | 17.00 → 17.08 | 8.18 |
+  | 9 | 38.52 → 38.62 | 38.77 → 38.65 | 19.75 |
+- **Decision:** keep (exact, free). As expected it doesn't move d ≥ 7; Step 3 is the lever.

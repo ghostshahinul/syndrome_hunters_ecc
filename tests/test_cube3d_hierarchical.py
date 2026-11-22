@@ -198,3 +198,16 @@ def test_deep_tier_options_numba_equals_reference(gate, opts):
     ref, fast = h.run(dets, backend="reference"), h.run(dets, backend="numba")
     for f in ("predictions", "fast", "uf_called", "ok", "max_cluster", "table"):
         np.testing.assert_array_equal(getattr(fast, f), getattr(ref, f), err_msg=f)
+
+
+
+@pytest.mark.parametrize("gate", GATES)
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5, 7)])
+def test_pass2_skip_is_exact_in_hierarchical(tier, d, gate):
+    g = detector_graph(tier, d, TIER_P[tier])
+    dets, _ = sample(tier, d, 800, seed=950 + d)
+    on = Hierarchical(g, HierarchicalConfig(gate=gate)).run(dets)
+    off = Hierarchical(g, HierarchicalConfig(gate=gate, uf=UnionFind3DConfig(correlated=True,
+                                                                             pass2_skip=False))).run(dets)
+    for f in ("predictions", "fast", "uf_called", "ok", "max_cluster", "table"):
+        np.testing.assert_array_equal(getattr(on, f), getattr(off, f), err_msg=f)
