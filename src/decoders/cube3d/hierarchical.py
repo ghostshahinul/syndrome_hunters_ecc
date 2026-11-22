@@ -47,7 +47,9 @@ class HierarchicalConfig:
     table: bool = True            # 1-4-event shots matching a single DEM fault: answer from a table
     # Deep tier: correlated two-pass UF by default (item 4: it beats plain PyMatching's accuracy
     # at d = 7/9 at about 2x its single-thread time). UnionFind3DConfig() gives plain UF.
-    uf: UnionFind3DConfig = field(default_factory=lambda: UnionFind3DConfig(correlated=True))
+    # Final round: pass 2 only when pass 1's largest cluster exceeds floor(rounds^2 / 6.5) nodes
+    # (LER within the 95% CI of always running pass 2 at p = 0.5%, d = 3-9; 14-23% faster).
+    uf: UnionFind3DConfig = field(default_factory=lambda: UnionFind3DConfig(correlated=True, pass2_gate=-1))
 
     def __post_init__(self) -> None:
         if self.gate not in GATES:
@@ -93,12 +95,13 @@ class HierarchicalResult:
 
 @njit(cache=True)
 def _deep(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw, correlated,
-          cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, wforest, slen, scred, passes, p2skip):
+          cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, wforest, slen, scred, passes, p2skip,
+          p2gate):
     """The deep tier on the detection events lits[:nlit]: plain or correlated two-pass UF."""
     if correlated:
         return _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
                                    smallest, uw, cptr, cidx, clen, ccredit, len2, mod, inside, keep,
-                                   stat_keep, False, wforest, slen, scred, passes, p2skip)
+                                   stat_keep, False, wforest, slen, scred, passes, p2skip, p2gate)
     return _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw,
                     False, wforest)
 
@@ -109,7 +112,7 @@ def _hier_batch(dets, K, partial, strict_r1,
                 edge_u, edge_v, length, inc_edge, b_inc, smallest, obs_bits,
                 out_bits, out_fast, out_uf, out_cleared, out_ok, out_lit, out_size,
                 correlated, cptr, cidx, clen, ccredit, tkeys, tvals, out_table, wforest, slen, scred, passes,
-                p2skip):
+                p2skip, p2gate):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -142,7 +145,7 @@ def _hier_batch(dets, K, partial, strict_r1,
             if c > K:
                 b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes, p2skip)
+                              wforest, slen, scred, passes, p2skip, p2gate)
                 out_bits[s] = b
                 out_uf[s] = True
                 out_ok[s] = ok
@@ -171,12 +174,12 @@ def _hier_batch(dets, K, partial, strict_r1,
             if partial:
                 b, ok = _deep(rlits, nr, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes, p2skip)
+                              wforest, slen, scred, passes, p2skip, p2gate)
                 out_bits[s] = bl ^ b
             else:
                 b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep,
-                              wforest, slen, scred, passes, p2skip)
+                              wforest, slen, scred, passes, p2skip, p2gate)
                 out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = uw[18][0]
@@ -228,7 +231,8 @@ class Hierarchical:
                         g.edge_u, g.edge_v, ut.length, g.inc_edge, ut.b_inc, ut.smallest,
                         g.edge_obs_bits, bits, fast, uf_called, cleared, ok, lit_count, size,
                         self.config.uf.correlated, ut.corr_ptr, ut.corr_idx, ut.corr_len, ut.corr_credit,
-                        tkeys, tvals, table, ut.wforest, ut.score_len, ut.score_credit, ut.passes, ut.p2skip)
+                        tkeys, tvals, table, ut.wforest, ut.score_len, ut.score_credit, ut.passes, ut.p2skip,
+                        ut.p2gate)
         else:
             bits, fast, uf_called, cleared, ok, size, table = self._run_reference(dets, K, gate, use_table)
             lit_count = dets.sum(axis=1, dtype=np.int32)

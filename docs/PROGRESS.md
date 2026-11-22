@@ -902,3 +902,48 @@ Step 1 commit: `d98284e` (branch).
   | 7 | 17.08 → 17.07 | 17.00 → 17.08 | 8.18 |
   | 9 | 38.52 → 38.62 | 38.77 → 38.65 | 19.75 |
 - **Decision:** keep (exact, free). As expected it doesn't move d ≥ 7; Step 3 is the lever.
+
+Step 2 commit: `50acad6` (branch).
+
+## Step 3: approximate pass-2 gate (branch, 01:50 to 02:10)
+**Predictor analysis** (instrumented reference; 20k shots at d = 5/7, 10k at d=9; p = 0.5%). These are
+the fractions of shots where pass 2 *changes* or *helps* the prediction that each feature keeps (recall).
+The best feature is pass 1's **largest cluster**, which is free since pass 1 already computes it:
+
+| d | changes | helps | max_cluster > T: share of shots running pass 2 / helpful changes kept |
+|---|---|---|---|
+| 5 | 0.615% | 0.475% | T=3: 42% / 97.9%; T=4: 24% / 89.5%; T=5: 20% / 81% |
+| 7 | 0.590% | 0.480% | T=6: 48% / 99.0%; T=10: 29% / 86.5%; T=14: 17% / 70% |
+| 9 | 0.600% | 0.530% | T=13: 50% / 96.2%; T=19: 29% / 84.9%; T=25: 19% / 74% |
+
+Correction size or weight, the number of shortened edges touching or inside clusters, and the largest
+length drop were all weaker predictors.
+
+**Implementation:** `UnionFind3DConfig(pass2_gate=T)` runs pass 2 only if pass 1's largest cluster
+has more than T nodes. **`pass2_gate=-1` means auto, T = ⌊rounds²/6.5⌋** (1 / 3 / 7 / 12 at
+d = 3/5/7/9). It is in numba and the reference, which are bit-identical (tested), and shots above the
+threshold decode exactly as with no gate.
+
+**Threshold sweep** (Hierarchical, 250k shots, single thread; `results/optimization/final_step3_d*_*.csv`).
+Always-run CIs: d=5 [1.1848, 1.2711], d=7 [0.7999, 0.8712], d=9 [0.4696, 0.5247].
+
+| d | T | LER | µs (÷ PM) | within the always-run CI? |
+|---|---|---|---|---|
+| 5 | always / 2 / 3 / 4 / 5 | 1.2272 / 1.2276 / 1.2356 / 1.2476 / 1.2988% | 5.98 (2.50×) / 5.61 / 5.33 / 4.82 / 4.62 (1.94×) | yes / yes / yes / yes / **no** |
+| 7 | always / 4 / 5 / 6 / 8 | 0.8348 / 0.8372 / 0.8396 / 0.8464 / 0.8704% | 17.28 (2.11×) / 15.20 / 14.74 / 13.76 / 12.73 (1.55×) | yes / yes / yes / yes / barely |
+| 9 | always / 8 / 10 / 13 / 16 | 0.4964 / 0.4976 / 0.5028 / 0.5164 / 0.5344% | 38.92 (1.96×) / 34.31 / 32.79 / 30.41 / 27.66 (1.39×) | yes / yes / yes / yes / **no** |
+
+**Auto-rule validation** (`final_step3_auto_*.csv`, 250k shots):
+
+| d | Hierarchical, always run | Hierarchical, auto gate | PyMatching |
+|---|---|---|---|
+| 3 | 1.7032% · 0.47 µs | 1.7032% · 0.48 µs | 1.6560% · 0.29 |
+| 5 | 1.2272% [1.185, 1.271] · 5.67 µs (2.32×) | **1.2356% [1.193, 1.280] · 4.89 µs (2.00×)** | 1.3828% [1.338, 1.429] · 2.44 |
+| 7 | 0.8348% [0.800, 0.871] · 17.07 µs (2.07×) | **0.8588% [0.823, 0.896] · 13.20 µs (1.60×)** | 1.0348% [0.996, 1.075] · 8.26 |
+| 9 | 0.4964% [0.470, 0.525] · 38.86 µs (1.94×) | **0.5108% [0.484, 0.540] · 31.13 µs (1.55×)** | 0.6696% [0.638, 0.702] · 20.07 |
+
+**Decision:** the auto gate **passes** (LER within the always-run CI at d = 3/5/7/9; the lead over plain
+PyMatching is still non-overlapping). It is now the default for Hierarchical's deep tier and for
+`uf3d_correlated`; plain `UnionFind3DConfig` stays ungated, and the golden configs are pinned to no gate.
+Gain: −14% (d=5), −23% (d=7), −20% (d=9) Hierarchical time. Still 1.55–2.0× PyMatching.
+**Caveat:** the rule was fitted at p = 0.5% only; at lower p clusters are smaller, so pass 2 runs less often.

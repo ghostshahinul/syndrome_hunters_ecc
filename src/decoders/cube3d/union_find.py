@@ -61,6 +61,8 @@ class UnionFind3DConfig:
     weighted_forest: bool = False  # E2: peel on a min-length (Kruskal) spanning forest
     passes: int = 2           # E4: 3 = reweight again from pass 2's correction (if it was kept)
     pass2_skip: bool = True   # exact: skip pass 2 when no shortened edge touches a pass-1 node
+    pass2_gate: int = 0       # approximate: run pass 2 only if pass 1's largest cluster has > this
+                              # many nodes (0 = always run; -1 = auto: floor(rounds^2 / 6.5))
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
@@ -86,8 +88,22 @@ class UFTables:
     wforest: bool = False  # peel on a Kruskal min-length spanning forest
     passes: int = 2        # correlated passes (2 or 3)
     p2skip: bool = True    # exact pass-2 skip (see UnionFind3DConfig.pass2_skip)
+    p2gate: int = 0        # approximate pass-2 gate (see UnionFind3DConfig.pass2_gate)
     score_len: np.ndarray | None = None     # (E,) int64 edge cost in the pass-selection score
     score_credit: np.ndarray | None = None  # (P,) int64 pair credit in the pass-selection score
+
+
+AUTO_GATE_DIVISOR = 6.5
+
+
+def resolve_pass2_gate(g: DetectorGraph3D, gate: int) -> int:
+    """pass2_gate = -1 (auto): floor(rounds^2 / 6.5), rounds = number of time layers - 1. Fitted at
+    circuit-level p = 0.5% so the LER stays within the 95% CI of always running pass 2
+    (thresholds 1 / 3 / 7 / 12 at d = 3 / 5 / 7 / 9)."""
+    if gate >= 0:
+        return int(gate)
+    rounds = max(1, len(np.unique(g.coords[:, 2])) - 1)
+    return int(rounds * rounds / AUTO_GATE_DIVISOR)
 
 
 def length_of(w: np.ndarray, w_min: float, scale: int) -> np.ndarray:
@@ -342,6 +358,11 @@ def uf_correlated_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.n
     st1: dict = {}
     bits, flipped, ok = uf_decode_shot_reference(g, t, dets_row, st1)
     result = (bits, flipped, ok, st1)
+    if t.p2gate > 0 and st1["max_cluster"] <= t.p2gate:
+        if stats is not None:
+            stats.update(st1)
+            stats.update(pass2_ran=False, pass2_kept=False, pass2_gated=True, pass2_changed_obs=False)
+        return bits, flipped, ok
     len2 = correlated_lengths(t, flipped)
     ran = kept = ran3 = kept3 = False
     rounds2 = 0
@@ -767,13 +788,15 @@ def _corr_score(flips, nf, length, cptr, cidx, ccredit, inside):
 @njit(cache=True)
 def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                         work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, skip, wforest,
-                        slen, scred, passes, p2skip):
+                        slen, scred, passes, p2skip, p2gate=0):
     """Pass 1 with `length`; pass 2 with the partners of pass-1 edges shortened; keep pass 2
     only if its correlated score is strictly lower. `len2` must equal `length` on entry and
     is restored. On return work[19..20] (flips) and work[18] (max cluster) describe the
     kept pass."""
     b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work,
                      skip, wforest)
+    if p2gate > 0 and work[18][0] <= p2gate:
+        return b, ok  # approximate gate: small clusters only, pass 2 rarely changes anything
     flips = work[19]
     nf1 = work[20][0]
     nm = 0
@@ -862,7 +885,7 @@ def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, 
 @njit(parallel=True, cache=True)
 def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits,
                          out_ok, smallest, out_size, cptr, cidx, clen, ccredit, skip, tkeys, tvals,
-                         out_table, wforest, slen, scred, passes, p2skip):
+                         out_table, wforest, slen, scred, passes, p2skip, p2gate):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -886,7 +909,8 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
                 continue
             b, ok = _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
                                         none, smallest, work, cptr, cidx, clen, ccredit, len2, mod,
-                                        inside, keep, stat_keep, skip, wforest, slen, scred, passes, p2skip)
+                                        inside, keep, stat_keep, skip, wforest, slen, scred, passes, p2skip,
+                                        p2gate)
             out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = work[18][0]
@@ -958,7 +982,7 @@ class UnionFind3D:
         self.config = config or UnionFind3DConfig()
         c = self.config
         t = replace(build_uf_tables(graph, c.scale, c.growth), skip=c.skip_ahead, wforest=c.weighted_forest,
-                    passes=c.passes, p2skip=c.pass2_skip)
+                    passes=c.passes, p2skip=c.pass2_skip, p2gate=resolve_pass2_gate(graph, c.pass2_gate))
         if c.float_score:
             sl, sc = float_score_tables(graph, t)
             t = replace(t, score_len=sl, score_credit=sc)
@@ -985,7 +1009,7 @@ class UnionFind3D:
             _uf_correlated_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                                  g.edge_obs_bits, corr, bits, ok, t.smallest, size,
                                  t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit, t.skip, tkeys, tvals,
-                                 table, t.wforest, t.score_len, t.score_credit, t.passes, t.p2skip)
+                                 table, t.wforest, t.score_len, t.score_credit, t.passes, t.p2skip, t.p2gate)
         elif backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                       g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip, tkeys, tvals, table,
@@ -1032,4 +1056,4 @@ class UnionFind3DCorrelatedDecoder(UnionFind3DDecoder):
     single_fault_allowance = 0
 
     def __init__(self, dem: stim.DetectorErrorModel, config: UnionFind3DConfig | None = None):
-        super().__init__(dem, config or UnionFind3DConfig(correlated=True, table=True))
+        super().__init__(dem, config or UnionFind3DConfig(correlated=True, table=True, pass2_gate=-1))

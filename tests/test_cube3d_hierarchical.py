@@ -206,8 +206,15 @@ def test_deep_tier_options_numba_equals_reference(gate, opts):
 def test_pass2_skip_is_exact_in_hierarchical(tier, d, gate):
     g = detector_graph(tier, d, TIER_P[tier])
     dets, _ = sample(tier, d, 800, seed=950 + d)
-    on = Hierarchical(g, HierarchicalConfig(gate=gate)).run(dets)
+    on = Hierarchical(g, HierarchicalConfig(gate=gate, uf=UnionFind3DConfig(correlated=True))).run(dets)
     off = Hierarchical(g, HierarchicalConfig(gate=gate, uf=UnionFind3DConfig(correlated=True,
                                                                              pass2_skip=False))).run(dets)
     for f in ("predictions", "fast", "uf_called", "ok", "max_cluster", "table"):
         np.testing.assert_array_equal(getattr(on, f), getattr(off, f), err_msg=f)
+
+
+
+def test_default_deep_tier_uses_auto_pass2_gate():
+    g = detector_graph("circuit", 7, 0.005)
+    h = Hierarchical(g)
+    assert h.config.uf.correlated and h.config.uf.pass2_gate == -1 and h.uf.tables.p2gate == 7
