@@ -2,6 +2,7 @@
 
 from src.decoders.base import Decoder
 from src.decoders.baseline import PyMatchingDecoder
+from src.decoders.cube3d.ensemble import UFEnsembleDecoder
 from src.decoders.cube3d.hierarchical import HierarchicalDecoder, HierarchicalPartialDecoder
 from src.decoders.cube3d.mwpm import MWPM3DDecoder
 from src.decoders.cube3d.three_tier import ThreeTierDecoder
@@ -14,7 +15,7 @@ DECODERS: dict[str, type[Decoder]] = {
     cls.name: cls
     for cls in (PyMatchingDecoder, UnionFindDecoder, ExperimentalDecoder, CubeCollapseDecoder,
                 UnionFind3DDecoder, HierarchicalDecoder, HierarchicalPartialDecoder, MWPM3DDecoder,
-                ThreeTierDecoder, UnionFind3DCorrelatedDecoder)
+                ThreeTierDecoder, UnionFind3DCorrelatedDecoder, UFEnsembleDecoder)
 }
 
 

@@ -442,3 +442,49 @@ d = 9**. It does not at d = 5 (CIs overlap; 1.260% vs 1.384%) or d = 3 (equal). 
 costs 1.75–1.9× PyMatching's time at d = 7/9, 2.3× at d=5 and 4.8× at d=3. That is not yet
 "within PyMatching's speed range": it sits between plain PyMatching and correlated PyMatching
 (0.60–0.68× of correlated PyMatching's time). Correlated PyMatching remains more accurate.
+
+Item 1 commits: `707cda6`, merged with your teammates' cleanup and pushed as `bb47c78`.
+- **Teammate cleanup that was merged:**
+  - 4 figure deletions, including `results/plots/accuracy_runtime_sweep_latest.png`. The README links to it; regenerate it with `python -m src.figures --sweep results/sweep_20261121_202412.csv`.
+  - PR #3, which deleted `src/__init__.py`, `figures/` and `native/`.
+- **Side effect of PR #3:** `src` is now a namespace package. pytest and `python -m src.…` from the repo root still work, the suite is green, and the CLIs import.
+  - What breaks: `pip install -e .` no longer exposes `src` (setuptools' `find` skips directories without `__init__.py`), so scripts run from *other* directories can't import `src` without `PYTHONPATH=.`.
+  - I did not revert their change. **Decide** whether to restore `src/__init__.py`.
+
+## Item 2: ensemble UF, `uf3d_ensemble` (21:36 to 21:41, time-box 1.5 h)
+
+**What was built** (`src/decoders/cube3d/ensemble.py`, registry `uf3d_ensemble`)
+- **Variants:** M UF variants per shot. Variant 0 is unperturbed. Variant v uses integer lengths from w·exp(σ·z_v), with z ~ N(0,1) and seed 1000+v, and odd variants use smallest-first growth. Each variant can be correlated (item 1).
+- **Winner:** the lowest score under the **original** lengths, using the correlated score (or the plain sum of lengths when not correlated). Ties go to the lowest v, so M=1 equals UF / UF3D correlated exactly (tested).
+- **Two numba layouts:**
+  - `parallel="variants"`: shots in sequence, `prange` over the M variants of each shot, so one shot uses up to M cores.
+  - `parallel="shots"`: `prange` over chunks of shots.
+  - Both are **bit-identical to the Python reference** (predictions, ok, chosen variant, correction; 3 tiers × d = 3/5 × correlated on/off).
+- **Other tests:** single components exact; syndrome consistency; and adding variants never raises the winner's score.
+- **σ:** set to 0.2 from a seed-7 check at d = 7/9 with M=8. Failures went 147 → 119 at d=7 and 107 → 84 at d=9 (σ = 0.1 gave 125/91, σ = 0.3 gave 142/113). The benchmark uses seed 0, so that choice doesn't bias the reported numbers.
+
+**Results** (`results/ensemble/ensemble_20261121_213502.csv`, figure `results/plots/ensemble_vs_M_20261121_213502.png`): p = 0.5%, 50k shots, seed 0. All times single-thread µs/shot from this one run; the machine is still about 1.5× slower than at 20:00.
+
+| d | PyMatching | Correlated PM | corr. ensemble M=1 | M=4 | M=8 | M=12 | plain ensemble M=1 → M=8 |
+|---|---|---|---|---|---|---|---|
+| 3 | 1.704% (0.60 µs) | 1.648% (1.69) | 1.712% (3.2) | 1.656% (12) | 1.606% (23) | 1.604% [1.498, 1.718] (35) | 1.710 → 1.702% |
+| 5 | 1.384% [1.285, 1.490] (4.4) | 1.074% [0.987, 1.168] (10.8) | 1.260% (11) | 1.142% (48) | **1.040% [0.955, 1.133]** (91) | 1.022% [0.938, 1.114] (133) | 1.498 → 1.448% |
+| 7 | 1.010% [0.926, 1.101] (11.6) | 0.628% [0.562, 0.701] (37) | 0.828% (29) | 0.754% (141) | 0.690% (294) | **0.646% [0.579, 0.720]** (425) | 1.166 → 1.256% |
+| 9 | 0.690% [0.621, 0.766] (30.3) | 0.278% [0.236, 0.328] (92) | 0.512% (63) | 0.480% (309) | **0.402% [0.350, 0.461]** (611) | 0.396% (946) | 0.876 → 0.942% |
+
+- **The correlated ensemble beats plain PyMatching with non-overlapping CIs at d = 5, 7 and 9** for M ≥ 8. At d = 7 (M=12) and d = 5 it is **within the CI of correlated PyMatching**; at d = 9 correlated PyMatching is still better (0.278% vs 0.396%).
+- **The plain ensemble does not help** and is slightly worse at d = 7/9. Picking the lowest original-weight correction among non-correlated UF variants doesn't approach MWPM here. The gain comes from correlation plus ensembling.
+- **Cost is far outside PyMatching's speed range:** M=8 is 25× (d=7) and 20× (d=9) PyMatching single-thread.
+
+**Cores used per shot (parallel over variants) vs parallel over shots**, correlated ensemble M=8, 10k shots (`ensemble_threads_20261121_213502.csv`):
+
+| threads | d=7: over variants (cores/shot) | d=7: over shots (1 core/shot) | d=9: over variants | d=9: over shots |
+|---|---|---|---|---|
+| 1 | 263 µs (1) | 242 µs | 625 µs (1) | 625 µs |
+| 2 | 154 (2) | 137 | 357 (2) | 297 |
+| 4 | 90 (4) | 70 | 205 (4) | 164 |
+| 8 | 58 (8) | 37 | 122 (8) | 84 |
+| 12 | 66 (8) | 28 | 132 (8) | 69 |
+
+- **Over variants:** 8 cores bring the latency of a single shot down 4.5–5.1×, to 58 µs (d=7). That is still 5× PyMatching single-thread.
+- **Over shots:** throughput is better (8.5–9× at 12 threads), but that is a throughput figure. PyMatching can be parallelized the same way with processes, so it is not a like-for-like comparison.

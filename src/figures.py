@@ -504,6 +504,69 @@ def plot_mwpm_tier(rows: list[dict], meta: dict | None = None):
     return fig
 
 
+# ---- ensemble: accuracy vs number of variants ---------------------------------------------
+def plot_ensemble_vs_m(rows: list[dict], meta: dict | None = None):
+    """rows: decoder in {PyMatching, Correlated PyMatching, UF3D ensemble, UF3D correlated
+    ensemble}, d, M ('' for the references), ler, ci_low, ci_high, us_per_shot.
+    One panel per d: LER vs M for the ensembles; the references are horizontal lines with
+    their 95% band. Labels give single-thread µs/shot."""
+    meta = meta or {}
+    distances = sorted({int(r["d"]) for r in rows})
+    fig, axes = plt.subplots(1, len(distances), figsize=(_width(len(distances), 5.2), 6.0),
+                             facecolor=SURFACE, squeeze=False)
+    axes = axes[0]
+    ens_names = ["UF3D ensemble", "UF3D correlated ensemble"]
+    refs = ["PyMatching", "Correlated PyMatching"]
+    for ax, d in zip(axes, distances):
+        _axes_style(ax)
+        Ms = sorted({int(float(r["M"])) for r in rows if r["decoder"] in ens_names and int(r["d"]) == d})
+        for n in refs:
+            pts = [r for r in rows if r["decoder"] == n and int(r["d"]) == d]
+            if not pts:
+                continue
+            r = pts[0]
+            col = style_for(n).color
+            ax.axhline(100 * r["ler"], color=col, lw=1.6, ls="--", zorder=2)
+            ax.axhspan(100 * r["ci_low"], 100 * r["ci_high"], color=col, alpha=0.12, lw=0, zorder=1)
+            ax.annotate(f"{n} ({r['us_per_shot']:.1f} µs)", (1.0, 100 * r["ler"]),
+                        xycoords=("axes fraction", "data"), textcoords="offset points",
+                        xytext=(-4, 4), ha="right", fontsize=9.5, color=INK_2)
+        for n in ens_names:
+            pts = sorted((r for r in rows if r["decoder"] == n and int(r["d"]) == d), key=lambda r: int(float(r["M"])))
+            if not pts:
+                continue
+            st = style_for(n)
+            xs = [int(float(r["M"])) for r in pts]
+            ys = [100 * r["ler"] for r in pts]
+            ax.errorbar(xs, ys, yerr=[[100 * (r["ler"] - r["ci_low"]) for r in pts],
+                                      [100 * (r["ci_high"] - r["ler"]) for r in pts]],
+                        fmt=("-" if n.startswith("UF3D correlated") else "--") + st.marker, color=st.color,
+                        lw=2, ms=8, mec=SURFACE, mew=1.2, elinewidth=1.5, capsize=3, zorder=3)
+            if n.startswith("UF3D correlated"):
+                for x, y, r in zip(xs, ys, pts):
+                    ax.annotate(f"{r['us_per_shot']:.0f} µs", (x, y), textcoords="offset points",
+                                xytext=(0, -16), ha="center", fontsize=9, color=INK_2)
+        ax.set_xticks(Ms)
+        ax.set_ylim(bottom=0)
+        ax.set_title(f"Distance {d}", fontsize=14, color=INK, pad=10)
+        ax.set_xlabel("UF variants per shot (M)", fontsize=12, color=INK_2)
+    axes[0].set_ylabel("Logical failures (%)", fontsize=12, color=INK_2)
+    first = rows[0]
+    _header(fig, "Ensemble UF: more variants per shot, fewer failures",
+            _subtitle(meta, first.get("shots"), first.get("p")))
+    handles = [Line2D([], [], color=style_for(n).color, marker=style_for(n).marker, ms=8, lw=2,
+                      ls="-" if n.startswith("UF3D correlated") else "--", label=n, mec=SURFACE)
+               for n in ens_names]
+    handles += [Line2D([], [], color=style_for(n).color, lw=1.6, ls="--", label=f"{n} (reference, 95% band)")
+                for n in refs]
+    top = _legend(fig, handles)
+    _footer(fig, ["Lower is better. Each shot is decoded by M UF variants (perturbed weights, mixed growth "
+                  "order); the correction that is cheapest under the original weights wins. All times are "
+                  "single-thread µs per shot, so they compare directly with PyMatching.", machine_line(meta)])
+    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.18)
+    return fig
+
+
 FIGURES: dict[str, Callable] = {
     "accuracy_runtime": plot_accuracy_runtime,
     "accuracy_runtime_sweep": plot_sweep,
@@ -511,6 +574,7 @@ FIGURES: dict[str, Callable] = {
     "fast_path_fraction": plot_fast_path_fraction,
     "cube_collapse_story": plot_cube_collapse_story,
     "mwpm_tier": plot_mwpm_tier,
+    "ensemble_vs_M": plot_ensemble_vs_m,
 }
 
 

@@ -1,0 +1,21 @@
+decoder,d,p,shots,threads,parallel,cores_per_shot,us_per_shot,cpu,cpu_mhz,power,logical_cpus,git_commit
+UF3D correlated ensemble M=8 (variants),7,0.005,10000,1,variants,1,262.5998800009256,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),7,0.005,10000,2,variants,2,153.57238000142388,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),7,0.005,10000,4,variants,4,90.12636999832466,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),7,0.005,10000,8,variants,8,57.786240000859834,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),7,0.005,10000,12,variants,8,65.61117000237573,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),7,0.005,10000,1,shots,1,241.95413999841549,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),7,0.005,10000,2,shots,1,137.06042999983765,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),7,0.005,10000,4,shots,1,69.98543000081554,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),7,0.005,10000,8,shots,1,36.77656000072602,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),7,0.005,10000,12,shots,1,28.39576000114903,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),9,0.005,10000,1,variants,1,624.871339998208,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),9,0.005,10000,2,variants,2,356.52797000075225,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),9,0.005,10000,4,variants,4,204.99562000040896,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),9,0.005,10000,8,variants,8,122.14027000009082,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (variants),9,0.005,10000,12,variants,8,131.6903099999763,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),9,0.005,10000,1,shots,1,625.0715400004992,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),9,0.005,10000,2,shots,1,296.71460000099614,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),9,0.005,10000,4,shots,1,163.90809000004083,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),9,0.005,10000,8,shots,1,84.3127000000095,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty
+UF3D correlated ensemble M=8 (shots),9,0.005,10000,12,shots,1,69.44140999985393,13th Gen Intel(R) Core(TM) i5-13420H,2100,AC / Balanced,12,bb47c78+dirty

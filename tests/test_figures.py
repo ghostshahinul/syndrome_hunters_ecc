@@ -6,7 +6,7 @@ import pytest
 
 from src.decoders import DECODERS
 from src.figures import (DISPLAY_NAMES, STYLES, display_name, plot_accuracy_runtime,
-                         plot_cube_collapse_story, plot_fast_path_fraction, plot_mwpm_tier, plot_sweep,
+                         plot_cube_collapse_story, plot_ensemble_vs_m, plot_fast_path_fraction, plot_mwpm_tier, plot_sweep,
                          plot_thread_scaling, read_rows, save_figure, style_for, write_rows)
 
 META = {"cpu": "13th Gen Intel(R) Core(TM) i5-13420H", "power": "AC / Balanced", "logical_cpus": "12",
@@ -119,3 +119,18 @@ def test_mwpm_tier(tmp_path):
             r.update(threshold=T, routed_fraction=0.4 / T)
             rows.append(r)
     _check(plot_mwpm_tier(_csv(tmp_path, "mwpm", rows), META), "mwpm_tier", tmp_path)
+
+
+def test_ensemble_vs_m(tmp_path):
+    rows = []
+    for d in (7, 9):
+        for n, k in (("PyMatching", 50), ("Correlated PyMatching", 30)):
+            r = _row(n, d, 0.005, k=k, us=10.0)
+            r["M"] = ""
+            rows.append(r)
+        for n in ("UF3D ensemble", "UF3D correlated ensemble"):
+            for M, k in ((1, 60), (4, 50), (8, 45), (12, 44)):
+                r = _row(n, d, 0.005, k=k, us=20.0 * M)
+                r["M"] = M
+                rows.append(r)
+    _check(plot_ensemble_vs_m(_csv(tmp_path, "ens", rows), META), "ensemble_vs_M", tmp_path)
