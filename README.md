@@ -42,7 +42,7 @@ pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib,
 |---|---|
 | **One-minute demo:** PyMatching vs UnionFind3D vs Hierarchical at p = 0.5%, d = 7 (table + `results/plots/demo_latest.png`) | `python -m scripts.demo` |
 | Run the test suite (writes test plots to `results/tests/<run>/`) | `python -m pytest -q` |
-| Full benchmark + every standard figure (about 3 min on the laptop) | `python -m src.benchmark` or `make benchmark` |
+| Full benchmark + every standard figure (747 s ≈ 12.5 min measured on the i5-13420H laptop, AC power, Balanced mode) | `python -m src.benchmark` or `make benchmark` |
 | Quick smoke benchmark into a scratch folder | `python -m src.benchmark --quick --out scratch_results` |
 | One part only | `python -m src.benchmark --only accuracy` (or `sweep`, `threads`) |
 | Regenerate figures from saved CSVs | `python -m src.figures --accuracy results/accuracy_runtime_<ts>.csv --sweep results/sweep_<ts>.csv --threads results/thread_scaling_<ts>.csv` |
@@ -511,6 +511,29 @@ in earlier counts were the `union_find` / `experimental` stubs, since deleted), 
 | `test_figures.py` | each figure function on a tiny synthetic CSV; never-overwrite; style registry unique |
 | `test_operating_point.py` | PyMatching, Correlated PyMatching, UnionFind3D, UF3D correlated and Hierarchical at p = 0.5%, d = 3/5/7/9, 3 batches × 50k shots (`--op-batches`, `--op-shots`). Writes `results/operating_point/operating_point_run<N>.png`. At d=9, every 3D decoder beats d=7 with non-overlapping CIs |
 | `test_performance.py` | Stim stage timings and decoder µs/shot vs distance (recorded, loose bounds) |
+
+---
+
+## Other team explorations (separate branches)
+
+These were developed in parallel by teammates. They are **not merged into `main`** and are **not
+included in any benchmark, table or figure in this README**. The descriptions follow each
+branch's own README and docstrings.
+
+- **FaultJoin decoder**, branch [`shahi_2`](https://github.com/ghostshahinul/syndrome_hunters_ecc/tree/shahi_2).
+  - On sparse syndromes, it lets whole DEM faults vote for a logical class: an exact vote over explanations of
+    zero, one or two faults.
+  - When the vote finds no explanation, it conditions union–find growth costs on the clicks of correlated partner
+    detectors.
+- **NVIDIA Ising hybrid decoder**, branch [`shahi_3`](https://github.com/ghostshahinul/syndrome_hunters_ecc/tree/shahi_3)
+  (it also contains the FaultJoin commit).
+  - NVIDIA's pretrained Fast R9 neural predecoder predicts local corrections and a logical frame.
+  - Ordinary or correlated PyMatching then decodes the residual syndrome, and the two logical predictions are XORed.
+  - It runs on NVIDIA's own Stim circuit, whose detectors and DEM differ from the circuits used here.
+- **MWPM pros/cons notes**, branch
+  [`aRAYofsunshine07-patch-1`](https://github.com/ghostshahinul/syndrome_hunters_ecc/tree/aRAYofsunshine07-patch-1).
+  It adds notes on minimum-weight perfect matching's strengths and weaknesses to `notebooks/MWPM.txt`, with a link
+  to fusion-blossom.
 
 ---
 

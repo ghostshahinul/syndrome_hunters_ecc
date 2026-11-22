@@ -1,6 +1,6 @@
 """Standard benchmark: measure, write CSVs, then draw every standard figure.
 
-    python -m src.benchmark                     # everything (about 10 min on a laptop)
+    python -m src.benchmark                     # everything (747 s ≈ 12.5 min measured on an i5-13420H laptop)
     python -m src.benchmark --quick             # small shot counts, for a smoke run
     python -m src.benchmark --only accuracy     # one part: accuracy | sweep | threads
 
