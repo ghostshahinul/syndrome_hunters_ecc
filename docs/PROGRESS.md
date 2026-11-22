@@ -619,3 +619,46 @@ They hold predictions, ok, max_cluster, a correction hash and the chosen variant
 correlated UF, Hierarchical (both gates and both deep tiers) and the correlated ensemble (M=4),
 on 600 shots each for 3 tiers × d = 3/5/7 plus circuit d=9. They were generated from the code
 before Phase B.
+
+Phase A commit: `7a62911` (pushed).
+
+## Phase B: exact speedups (00:02 to 00:28)
+**Result: no net speedup. The B1/B2 changes as specified were 14–22% slower, so most were reverted.**
+Every version stayed bit-identical to the saved golden outputs (`tests/test_golden.py`).
+
+**What was tried** (CSVs `results/optimization/phaseB_*.csv`; the old kernels from `7a62911`
+were loaded from git and timed in the same run, single thread, best of 3, 50k shots, p = 0.5%):
+- **B1, skip-ahead growth (exact):**
+  - **Rounds:** executed growth rounds per pass fell from 5.0 / 6.0 / 6.9 (round by round) to
+    2.8 / 3.9 / 4.8 at d = 5/7/9.
+  - **Cost:** it needs the frontier and its rates before it can jump, which means three passes over
+    the frontier per round instead of one. That made each round 25–43% more expensive than the
+    old single-pass round, more than the saved rounds (d=7 plain UF: 7.25 µs old, 8.32 µs new; with
+    the skip disabled in the new structure, 10.37 µs).
+  - **The saturated-node skip** (per-node count of ungrown incident edges) cost more than it saved.
+- **B2, removing O(n) scans:** lit indices are now extracted once per shot and passed down
+  (`_uf_shot(lits, nlit, …)`, `local_shot(lit, lits, nlit, …)`, Hierarchical keeps a sparse
+  dense buffer). Sorting the visited nodes for the peeling roots, and a sorted list of grown
+  boundary edges, were both **slower** than the byte scans over n and over the boundary edges
+  at d ≤ 9 (the sort of grown boundary edges alone cost 3–7%).
+
+**Kept** (exact, golden-tested):
+- the lits interface, which Phase D needs to decode a subset of events;
+- skip-ahead as an option, `UnionFind3DConfig(skip_ahead=True)`, tested equal to round-by-round
+  growth at S = 4 and 16 (plain and correlated, 3 tiers). Its executed rounds no longer grow with
+  the weight scale S, which matters for E3.
+
+**Reverted to the old code:** the single-pass growth loop as the default, the root scan over n, and
+the boundary scan over all boundary edges.
+
+**Final B3 timing** (`phaseB_20261122_002717.csv`; µs/shot old → new, single thread):
+
+| d | PyMatching | UnionFind3D | UF3D correlated | Hierarchical | Hierarchical ÷ PM |
+|---|---|---|---|---|---|
+| 5 | 2.45 | 2.49 → 2.71 | 5.80 → 5.88 | 5.65 → 5.83 | 2.38× |
+| 7 | 8.26 | 7.46 → 7.71 | 16.59 → 16.78 | 16.98 → 16.88 | 2.04× |
+| 9 | 20.15 | 17.58 → 17.78 | 38.55 → 38.43 | 38.51 → 38.69 | 1.92× |
+
+**What this shows:** at the default S = 4 the growth loop isn't where the time goes. Correlated UF is
+two full UF passes; the lever is doing less in pass 2 (Phase D) and serving easy shots without UF
+(Phase C).

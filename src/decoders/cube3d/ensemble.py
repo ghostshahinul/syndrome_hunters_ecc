@@ -28,7 +28,7 @@ from numba import njit, prange
 
 from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
-from src.decoders.cube3d.union_find import (_corr_score, _uf_correlated_shot, _uf_shot, bits_to_bool,
+from src.decoders.cube3d.union_find import (_corr_score, _uf_correlated_shot, _uf_shot, bits_to_bool, extract_lits,
                                             build_uf_tables, correlated_score, length_of,
                                             uf_correlated_shot_reference, uf_decode_shot_reference)
 
@@ -89,27 +89,29 @@ def _multi_work(M, n, E):
             np.empty((M, E), np.int32), np.zeros((M, n + 1), np.bool_), np.empty((M, E), np.int32),
             np.zeros((M, n + 1), np.bool_), np.empty((M, n + 1), np.int32), np.empty((M, n + 1), np.int32),
             np.empty((M, n), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, n + 1), np.bool_),
-            np.zeros((M, 1), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, 1), np.int32))
+            np.zeros((M, 1), np.int32), np.empty((M, n + 1), np.int32), np.zeros((M, 1), np.int32),
+            np.zeros((M, E), np.int32), np.empty((M, E), np.int32), np.zeros((M, n + 1), np.int32),
+            np.empty((M, E), np.int32), np.empty((M, n), np.int32), np.empty((M, n), np.int32))
 
 
 @njit(cache=True)
 def _view(W, v):
     return (W[0][v], W[1][v], W[2][v], W[3][v], W[4][v], W[5][v], W[6][v], W[7][v], W[8][v], W[9][v],
             W[10][v], W[11][v], W[12][v], W[13][v], W[14][v], W[15][v], W[16][v], W[17][v], W[18][v],
-            W[19][v], W[20][v])
+            W[19][v], W[20][v], W[21][v], W[22][v], W[23][v], W[24][v], W[25][v], W[26][v])
 
 
 @njit(cache=True)
-def _variant(row, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits, correlated,
+def _variant(lits, nlit, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits, correlated,
              cptr, cidx, clen, ccredit, W, len2, mod, inside, keep, stat_keep, none):
-    """Decode one shot with variant v; returns (bits, ok, score under lengths[0])."""
+    """Decode the events lits[:nlit] with variant v; returns (bits, ok, score under lengths[0])."""
     work = _view(W, v)
     if correlated:
-        b, ok = _uf_correlated_shot(row, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits, none,
-                                    smallest[v], work, cptr, cidx, clen, ccredit, len2[v], mod[v],
+        b, ok = _uf_correlated_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits,
+                                    none, smallest[v], work, cptr, cidx, clen, ccredit, len2[v], mod[v],
                                     inside[v], keep[v], stat_keep[v])
     else:
-        b, ok = _uf_shot(row, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits, none,
+        b, ok = _uf_shot(lits, nlit, 0, edge_u, edge_v, lengths[v], inc_edge, b_inc, obs_bits, none,
                          smallest[v], work)
     flips = work[19]
     nf = work[20][0]
@@ -138,10 +140,10 @@ def _scratch(M, n, E, lengths):
 
 
 @njit(parallel=True, cache=True)
-def _variants_of_shot(row, M, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits, correlated,
+def _variants_of_shot(lits, nlit, M, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits, correlated,
                       cptr, cidx, clen, ccredit, W, len2, mod, inside, keep, stat_keep, none, vb, vok, vsc):
     for v in prange(M):
-        b, ok, sc = _variant(row, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits,
+        b, ok, sc = _variant(lits, nlit, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits,
                              correlated, cptr, cidx, clen, ccredit, W, len2, mod, inside, keep,
                              stat_keep, none)
         vb[v] = b
@@ -161,8 +163,10 @@ def _ens_by_variants(dets, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, o
     vok = np.zeros(M, np.bool_)
     vsc = np.zeros(M, np.int64)
     record = corr.shape[0] > 0
+    lits = np.empty(n, np.int32)
     for s in range(S):
-        _variants_of_shot(dets[s], M, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits,
+        nlit = extract_lits(dets[s], lits)
+        _variants_of_shot(lits, nlit, M, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_bits,
                           correlated, cptr, cidx, clen, ccredit, W, len2, mod, inside, keep, stat_keep,
                           none, vb, vok, vsc)
         best = _pick(M, vb, vok, vsc)
@@ -188,9 +192,11 @@ def _ens_by_shots(dets, edge_u, edge_v, lengths, smallest, inc_edge, b_inc, obs_
         vb = np.zeros(M, np.uint64)
         vok = np.zeros(M, np.bool_)
         vsc = np.zeros(M, np.int64)
+        lits = np.empty(n, np.int32)
         for s in range(ci * chunk, min(S, (ci + 1) * chunk)):
+            nlit = extract_lits(dets[s], lits)
             for v in range(M):
-                b, ok, sc = _variant(dets[s], v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc,
+                b, ok, sc = _variant(lits, nlit, v, edge_u, edge_v, lengths, smallest, inc_edge, b_inc,
                                      obs_bits, correlated, cptr, cidx, clen, ccredit, W, len2, mod,
                                      inside, keep, stat_keep, none)
                 vb[v] = b

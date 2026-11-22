@@ -36,6 +36,7 @@ import numpy as np
 from numba import njit, prange
 
 from src.decoders.cube3d.graph import DetectorGraph3D
+from src.decoders.cube3d.union_find import extract_lits
 
 RULES = ("r1", "r2", "r3")
 LOCAL_BACKENDS = ("reference", "numba")
@@ -261,19 +262,18 @@ def _clear(lit, nlc, nbr, x):
 
 
 @njit(cache=True)
-def local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits, cleared,
-               strict_r1, work):
-    """Apply R1, R2, R3 in place on one shot's lit (uint8, n). Adds cleared counts per rule
-    to cleared (3,). Returns (observable bits of the flipped edges, lit nodes remaining)."""
+def local_shot(lit, lits0, nlit0, nbr, nbr_edge, ball2, boundary_edge, color, n_colors, edge_obs_bits,
+               cleared, strict_r1, work):
+    """Apply R1, R2, R3 in place on one shot. `lit` (uint8, n) is the dense shot, whose lit
+    nodes are exactly lits0[:nlit0] (no O(n) scan here). Adds cleared counts per rule to
+    cleared (3,). Returns (observable bits of the flipped edges, lit nodes remaining)."""
     (nlc, litlist, cand, by_color, seen, start, fill, act_a, act_b, act_e, act_f, init) = work
     n = lit.shape[0]
     D = nbr.shape[1]
-    nlit = 0
-    for v in range(n):
-        if lit[v]:
-            litlist[nlit] = v
-            init[nlit] = v
-            nlit += 1
+    nlit = nlit0
+    for i in range(nlit0):
+        litlist[i] = lits0[i]
+        init[i] = lits0[i]
     n_init = nlit
     m = nlit
     bits = np.uint64(0)
@@ -424,23 +424,25 @@ def _local_batch(dets, K, strict_r1, nbr, nbr_edge, ball2, boundary_edge, color,
     nchunk = (S + CHUNK - 1) // CHUNK
     for ci in prange(nchunk):
         work = local_work(n, n_colors)
-        lit = np.empty(n, np.uint8)
+        lit = np.zeros(n, np.uint8)   # dense shot, kept all-zero between shots
+        lits = np.empty(n, np.int32)
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
-            c = 0
-            for v in range(n):
-                lit[v] = dets[s, v]
-                if lit[v]:
-                    c += 1
+            c = extract_lits(dets[s], lits)
             out_lit[s] = c
+            for i in range(c):
+                lit[lits[i]] = 1
             if c == 0 or c > K:
                 out_rem[s] = c
             else:
-                b, rem = local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
+                b, rem = local_shot(lit, lits, c, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                                     edge_obs_bits, out_cleared[s], strict_r1, work)
                 out_bits[s] = b
                 out_rem[s] = rem
-            if record:
-                residual[s] = lit
+            for i in range(c):
+                v = lits[i]
+                if record:
+                    residual[s, v] = lit[v]
+                lit[v] = 0
 
 
 def run_local_numba(g: DetectorGraph3D, tables: LocalTables, detection_events: np.ndarray,

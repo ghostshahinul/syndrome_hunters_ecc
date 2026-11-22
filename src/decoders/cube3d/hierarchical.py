@@ -29,7 +29,7 @@ from src.decoders.base import Decoder
 from src.decoders.cube3d.graph import DetectorGraph3D, build_detector_graph
 from src.decoders.cube3d.local import Cube3DLocal, Cube3DLocalConfig, local_shot, local_work
 from src.decoders.cube3d.union_find import (CHUNK, UnionFind3D, UnionFind3DConfig, _uf_correlated_shot,
-                                            _uf_shot, bits_to_bool, uf_correlated_shot_reference,
+                                            _uf_shot, bits_to_bool, extract_lits, uf_correlated_shot_reference,
                                             uf_decode_shot_reference, uf_work)
 
 GATES = ("whole_shot", "partial")
@@ -85,14 +85,14 @@ class HierarchicalResult:
 
 
 @njit(cache=True)
-def _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw, correlated,
+def _deep(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw, correlated,
           cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep):
-    """The deep tier on one shot: plain or correlated two-pass UF."""
+    """The deep tier on the detection events lits[:nlit]: plain or correlated two-pass UF."""
     if correlated:
-        return _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
+        return _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
                                    smallest, uw, cptr, cidx, clen, ccredit, len2, mod, inside, keep,
                                    stat_keep)
-    return _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw)
+    return _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, uw)
 
 
 @njit(parallel=True, cache=True)
@@ -114,21 +114,18 @@ def _hier_batch(dets, K, partial, strict_r1,
         keep = np.empty(n + 1, np.int32)
         stat_keep = np.zeros(1, np.int32)
         lw = local_work(n, n_colors)
-        lit = np.empty(n, np.uint8)
+        lit = np.zeros(n, np.uint8)   # dense shot for the local rules, all-zero between shots
+        lits = np.empty(n, np.int32)  # lit indices of the shot (extracted once)
+        rlits = np.empty(n, np.int32)  # residual lit indices (partial gate)
         cl = np.zeros(3, np.int32)
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
-            row = dets[s]
-            c = 0
-            for v in range(n):
-                lit[v] = row[v]
-                if row[v]:
-                    c += 1
+            c = extract_lits(dets[s], lits)
             out_lit[s] = c
             if c == 0:
                 out_fast[s] = True
                 continue
             if c > K:
-                b, ok = _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = b
                 out_uf[s] = True
@@ -138,20 +135,29 @@ def _hier_batch(dets, K, partial, strict_r1,
             cl[0] = 0
             cl[1] = 0
             cl[2] = 0
-            bl, rem = local_shot(lit, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
+            for i in range(c):
+                lit[lits[i]] = 1
+            bl, rem = local_shot(lit, lits, c, nbr, nbr_edge, ball2, boundary_edge, color, n_colors,
                                  obs_bits, cl, strict_r1, lw)
             out_cleared[s] = cl[0] + cl[1] + cl[2]
+            nr = 0
+            for i in range(c):  # residual events, then restore the all-zero dense buffer
+                v = lits[i]
+                if lit[v]:
+                    rlits[nr] = v
+                    nr += 1
+                    lit[v] = 0
             if rem == 0:
                 out_bits[s] = bl
                 out_fast[s] = True
                 continue
             out_uf[s] = True
             if partial:
-                b, ok = _deep(lit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                b, ok = _deep(rlits, nr, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = bl ^ b
             else:
-                b, ok = _deep(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                b, ok = _deep(lits, c, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
                               uw, correlated, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep)
                 out_bits[s] = b
             out_ok[s] = ok

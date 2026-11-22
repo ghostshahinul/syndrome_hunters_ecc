@@ -209,3 +209,21 @@ def test_correlated_lengths_never_exceed_base():
 def test_correlated_registered():
     from src.decoders import DECODERS
     assert "uf3d_correlated" in DECODERS
+
+
+@pytest.mark.parametrize("correlated", [False, True])
+@pytest.mark.parametrize("scale", [4, 16])
+@pytest.mark.parametrize("tier,d", [(t, d) for t in NOISE_TIERS for d in (3, 5)])
+def test_skip_ahead_growth_is_exact(tier, d, scale, correlated):
+    """Skip-ahead growth (numba) == round-by-round growth (numba) == reference."""
+    g = detector_graph(tier, d, TIER_P[tier])
+    dets, _ = sample(tier, d, 300, seed=300 + d)
+    base = UnionFind3D(g, UnionFind3DConfig(scale=scale, correlated=correlated))
+    fast = UnionFind3D(g, UnionFind3DConfig(scale=scale, correlated=correlated, skip_ahead=True))
+    a = base.run(dets, record_correction=True)
+    b = fast.run(dets, record_correction=True)
+    r = fast.run(dets, record_correction=True, backend="reference")
+    for x in (b, r):
+        np.testing.assert_array_equal(x.predictions, a.predictions)
+        np.testing.assert_array_equal(x.correction, a.correction)
+        np.testing.assert_array_equal(x.max_cluster, a.max_cluster)

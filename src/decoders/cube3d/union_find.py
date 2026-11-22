@@ -55,6 +55,7 @@ class UnionFind3DConfig:
     scale: int = 4
     growth: str = "all"
     correlated: bool = False  # two-pass: reweight partners of pass-1 edges, decode again
+    skip_ahead: bool = False  # exact skip-ahead growth (same results; pays off only at large scale)
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
@@ -74,6 +75,7 @@ class UFTables:
     corr_idx: np.ndarray | None = None  # (P,) int32 partner f
     corr_len: np.ndarray | None = None  # (P,) int32 length of f given e is in the correction
     corr_credit: np.ndarray | None = None  # (P,) int32 max(0, L_e + L_f - L_joint): pair bonus
+    skip: bool = False   # skip-ahead growth path in the numba kernel
 
 
 def length_of(w: np.ndarray, w_min: float, scale: int) -> np.ndarray:
@@ -111,7 +113,8 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
     If `stats` is given it receives the per-shot instrumentation (the reference is the
     instrumented implementation; the numba kernel runs the same algorithm uninstrumented):
       max_cluster  node count of the largest final cluster
-      rounds       growth rounds          idle_rounds  rounds in which no edge completed
+      rounds       executed growth rounds (each completes >= 1 edge; idle rounds are skipped)
+      idle_rounds  rounds skipped because no edge would complete (rounds + idle = round-by-round)
       lit          detection events       clusters     final clusters (distinct roots)
       labels       {node: root} for every node in a cluster"""
     n, B = g.n_det, g.n_det
@@ -166,23 +169,27 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
         if t.smallest:
             m = min(size[r] for r in active)
             active = {r for r in active if size[r] == m}
-        newly: list[int] = []
-        grew = False
+        # Skip-ahead: every frontier edge grows by its rate r_e (number of active endpoints)
+        # per round, and nothing changes until some edge completes, so apply
+        # delta = min ceil((L_e - support_e) / r_e) rounds at once.
+        rate: dict[int, int] = {}
         for u in visited:
             if find(u) not in active:
                 continue
             for e in incident(u):
-                if e in grown or support[e] >= t.length[e]:
+                if e in grown:
                     continue
-                grew = True
-                support[e] += 1
-                if support[e] >= t.length[e]:
-                    newly.append(e)
-        if not grew:
+                rate[e] = rate.get(e, 0) + 1
+        if not rate:
             ok = False  # an odd cluster with nothing left to grow (no boundary path)
             break
-        if not newly:
-            idle += 1
+        delta = min(-(-(int(t.length[e]) - support[e]) // r) for e, r in rate.items())
+        idle += delta - 1
+        newly: list[int] = []
+        for e, r in rate.items():
+            support[e] = min(int(t.length[e]), support[e] + r * delta)
+            if support[e] >= t.length[e]:
+                newly.append(e)
         for e in newly:
             grown.add(e)
             u, v = int(g.edge_u[e]), int(g.edge_v[e])
@@ -341,27 +348,57 @@ def uf_work(n, E):
             np.zeros(n + 1, np.bool_),           # 17 defect
             np.zeros(1, np.int32),               # 18 out: node count of the largest cluster
             np.empty(n + 1, np.int32),           # 19 out: flipped edges (peeling order)
-            np.zeros(1, np.int32))               # 20 out: number of flipped edges
+            np.zeros(1, np.int32),               # 20 out: number of flipped edges
+            np.zeros(E, np.int32),               # 21 rate: active endpoints of a frontier edge (round)
+            np.empty(E, np.int32),               # 22 frontier edges of the round
+            np.zeros(n + 1, np.int32),           # 23 (unused; kept for a stable workspace layout)
+            np.empty(E, np.int32),               # 24 (unused; kept for a stable workspace layout)
+            np.empty(n, np.int32),               # 25 (unused; kept for a stable workspace layout)
+            np.empty(n, np.int32))               # 26 lit-index buffer for callers
 
 
 @njit(cache=True)
-def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work):
+def extract_lits(row, buf):
+    """Indices of the nonzero entries of a dense detection row -> buf[:k]; returns k.
+    The only O(n) pass over a shot; everything downstream works on the k lit indices."""
+    k = 0
+    for v in range(row.shape[0]):
+        if row[v]:
+            buf[k] = v
+            k += 1
+    return k
+
+
+@njit(cache=True)
+def _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work,
+             skip=False):
+    """UF on the detection events lits[:nlit] (ascending order not required).
+
+    Two exact growth paths (same grown edges and clusters, so bit-identical results):
+      skip=False  round by round, one pass per round (fastest at the default S = 4);
+      skip=True   skip-ahead: while no edge completes the active set, and so each frontier
+                  edge's rate r_e (number of active endpoints, 1 or 2), cannot change, so the
+                  idle rounds before the next completion, delta = min ceil((L_e - s_e) / r_e),
+                  are applied at once. The executed rounds no longer grow with the weight scale
+                  S, but each costs three passes over the frontier (Phase B: 25-43% slower per
+                  round), so this pays off only at large S."""
     (parent, rank, parity, touches, size, in_cluster, visited, support, grown, newly,
-     active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat, flips, nflips) = work
-    n = row.shape[0]
+     active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat, flips, nflips,
+     rate, frontier, rem, gb, sortbuf, _litbuf) = work
+    n = in_cluster.shape[0] - 1
     B = n
     D = inc_edge.shape[1]
-    nvis = 0
-    for v in range(n):
-        if row[v]:
-            parity[v] = 1
-            in_cluster[v] = True
-            visited[nvis] = v
-            nvis += 1
-    if nvis == 0:
+    if nlit == 0:
         stat[0] = 0
         nflips[0] = 0
         return np.uint64(0), True
+    nvis = 0
+    for i in range(nlit):
+        v = lits[i]
+        parity[v] = 1
+        in_cluster[v] = True
+        visited[nvis] = v
+        nvis += 1
     ntouched = 0
 
     ok = True
@@ -385,28 +422,70 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                 if active[visited[i]] and size[_find(parent, visited[i])] != m:
                     active[visited[i]] = False
         nnew = 0
-        growable = False
-        for i in range(nvis):
-            u = visited[i]
-            if not active[u]:
-                continue
-            for j in range(D):
-                e = inc_edge[u, j]
-                if e < 0:
-                    break
-                if grown[e] or support[e] >= length[e]:
+        if skip:
+            # frontier edges of the active clusters, with their rates
+            nfr = 0
+            for i in range(nvis):
+                u = visited[i]
+                if not active[u]:
                     continue
-                growable = True
+                for j in range(D):
+                    e = inc_edge[u, j]
+                    if e < 0:
+                        break
+                    if grown[e]:
+                        continue
+                    if rate[e] == 0:
+                        frontier[nfr] = e
+                        nfr += 1
+                    rate[e] += 1
+            if nfr == 0:
+                ok = False  # an odd cluster with nothing left to grow (no boundary path)
+                break
+            delta = 1 << 30
+            for k in range(nfr):
+                e = frontier[k]
+                need = length[e] - support[e]
+                if rate[e] == 2:  # r is 1 or 2 (an edge has two endpoints): no integer division
+                    need = (need + 1) >> 1
+                if need < delta:
+                    delta = need
+            for k in range(nfr):
+                e = frontier[k]
                 if support[e] == 0:
                     touched[ntouched] = e
                     ntouched += 1
-                support[e] += 1
-                if support[e] >= length[e]:
+                s2 = support[e] + rate[e] * delta
+                rate[e] = 0
+                if s2 >= length[e]:
+                    support[e] = length[e]
                     newly[nnew] = e
                     nnew += 1
-        if not growable:
-            ok = False
-            break
+                else:
+                    support[e] = s2
+        else:
+            growable = False
+            for i in range(nvis):
+                u = visited[i]
+                if not active[u]:
+                    continue
+                for j in range(D):
+                    e = inc_edge[u, j]
+                    if e < 0:
+                        break
+                    if grown[e] or support[e] >= length[e]:
+                        continue
+                    growable = True
+                    if support[e] == 0:
+                        touched[ntouched] = e
+                        ntouched += 1
+                    support[e] += 1
+                    if support[e] >= length[e]:
+                        newly[nnew] = e
+                        nnew += 1
+            if not growable:
+                ok = False
+                break
         for k in range(nnew):
             e = newly[k]
             grown[e] = True
@@ -435,11 +514,14 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                 touches[ra] = touches[ra] or touches[rb]
                 size[ra] += size[rb]
 
-    # Peeling forest: BFS from boundary, then from cluster nodes in ascending id.
+    # Peeling forest: BFS from the boundary (grown boundary edges, ascending id), then from
+    # the cluster nodes in ascending id; neighbors in ascending edge id. (Phase B tried sorted
+    # lists of the visited nodes and grown boundary edges instead of these scans; both were
+    # slower at d <= 9, so the scans stay.)
     norder = 0
-    for step in range(n + 1):
-        root = B if step == 0 else step - 1
-        if step > 0 and (not in_cluster[root] or marked[root]):
+    for idx in range(-1, n):
+        root = B if idx < 0 else idx
+        if idx >= 0 and (not in_cluster[root] or marked[root]):
             continue
         marked[root] = True
         qh = 0
@@ -484,9 +566,8 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
                     queue[qt] = y
                     qt += 1
 
-    for i in range(nvis):
-        v = visited[i]
-        defect[v] = row[v] != 0
+    for i in range(nlit):
+        defect[lits[i]] = True
     bits = np.uint64(0)
     record = corr.shape[0] > 0
     nf = 0
@@ -535,16 +616,18 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
 
 @njit(parallel=True, cache=True)
 def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits, out_ok,
-              smallest, out_size):
+              smallest, out_size, skip=False):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
     nchunk = (S + CHUNK - 1) // CHUNK
     for ci in prange(nchunk):
         work = uf_work(n, E)
+        lits = work[26]
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
-            b, ok = _uf_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
-                             smallest, work)
+            nlit = extract_lits(dets[s], lits)
+            b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr,
+                             smallest, work, skip)
             out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = work[18][0]
@@ -571,13 +654,14 @@ def _corr_score(flips, nf, length, cptr, cidx, ccredit, inside):
 
 
 @njit(cache=True)
-def _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
-                        work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep):
+def _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                        work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep, skip=False):
     """Pass 1 with `length`; pass 2 with the partners of pass-1 edges shortened; keep pass 2
     only if its correlated score is strictly lower. `len2` must equal `length` on entry and
     is restored. On return work[19..20] (flips) and work[18] (max cluster) describe the
     kept pass."""
-    b, ok = _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work)
+    b, ok = _uf_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work,
+                     skip)
     flips = work[19]
     nf1 = work[20][0]
     nm = 0
@@ -597,7 +681,8 @@ def _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bit
     for i in range(nf1):
         keep[i] = flips[i]
     stat_keep[0] = work[18][0]
-    b2, ok2 = _uf_shot(row, s, edge_u, edge_v, len2, inc_edge, b_inc, obs_bits, corr, smallest, work)
+    b2, ok2 = _uf_shot(lits, nlit, s, edge_u, edge_v, len2, inc_edge, b_inc, obs_bits, corr, smallest, work,
+                       skip)
     for i in range(nm):
         len2[mod[i]] = length[mod[i]]
     score2 = _corr_score(flips, work[20][0], length, cptr, cidx, ccredit, inside)
@@ -612,7 +697,7 @@ def _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bit
 
 @njit(parallel=True, cache=True)
 def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits,
-                         out_ok, smallest, out_size, cptr, cidx, clen, ccredit):
+                         out_ok, smallest, out_size, cptr, cidx, clen, ccredit, skip=False):
     S = dets.shape[0]
     n = dets.shape[1]
     E = edge_u.shape[0]
@@ -620,6 +705,7 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
     record = corr.shape[0] > 0
     for ci in prange(nchunk):
         work = uf_work(n, E)
+        lits = work[26]
         len2 = length.copy()
         mod = np.empty(E, np.int32)
         inside = np.zeros(E, np.bool_)
@@ -627,9 +713,10 @@ def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits
         stat_keep = np.zeros(1, np.int32)
         none = np.zeros((0, 0), np.uint8)
         for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
-            b, ok = _uf_correlated_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
+            nlit = extract_lits(dets[s], lits)
+            b, ok = _uf_correlated_shot(lits, nlit, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
                                         none, smallest, work, cptr, cidx, clen, ccredit, len2, mod,
-                                        inside, keep, stat_keep)
+                                        inside, keep, stat_keep, skip)
             out_bits[s] = b
             out_ok[s] = ok
             out_size[s] = work[18][0]
@@ -656,7 +743,8 @@ class UnionFind3D:
     def __init__(self, graph: DetectorGraph3D, config: UnionFind3DConfig | None = None):
         self.graph = graph
         self.config = config or UnionFind3DConfig()
-        self.tables = build_uf_tables(graph, self.config.scale, self.config.growth)
+        self.tables = replace(build_uf_tables(graph, self.config.scale, self.config.growth),
+                              skip=self.config.skip_ahead)
 
     def run(self, detection_events: np.ndarray, record_correction: bool = False,
             backend: str | None = None) -> UFResult:
@@ -674,10 +762,10 @@ class UnionFind3D:
         if backend == "numba" and correlated:
             _uf_correlated_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                                  g.edge_obs_bits, corr, bits, ok, t.smallest, size,
-                                 t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit)
+                                 t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit, t.skip)
         elif backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
-                      g.edge_obs_bits, corr, bits, ok, t.smallest, size)
+                      g.edge_obs_bits, corr, bits, ok, t.smallest, size, t.skip)
         else:
             shot_fn = uf_correlated_shot_reference if correlated else uf_decode_shot_reference
             for s in range(S):
