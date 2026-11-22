@@ -67,6 +67,8 @@ STYLES: dict[str, Style] = {
     "UF3D correlated ensemble": Style("#e87ba4", "<"),
     # an earlier build of Hierarchical, drawn in neutral ink next to the current one
     "Hierarchical (main)":    Style("#898781", "8"),
+    # teammate decoder (branch shahi_2), integration branch only
+    "FaultJoin":              Style("#b8860b", "H"),
 }
 FALLBACK = Style(MUTED, "o")
 
@@ -82,6 +84,7 @@ DISPLAY_NAMES = {
     "hierarchical_mwpm": "Hierarchical + MWPM",
     "uf3d_correlated": "UF3D correlated",
     "uf3d_ensemble": "UF3D ensemble",
+    "fault_join": "FaultJoin",
 }
 
 # ordinal ramp for distance (sequential blue, steps 250 -> 700), plus a marker per d

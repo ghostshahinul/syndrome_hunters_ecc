@@ -8,12 +8,13 @@ from src.decoders.cube3d.mwpm import MWPM3DDecoder
 from src.decoders.cube3d.three_tier import ThreeTierDecoder
 from src.decoders.cube3d.union_find import UnionFind3DCorrelatedDecoder, UnionFind3DDecoder
 from src.decoders.cube_collapse import CubeCollapseDecoder
+from src.decoders.faultjoin import FaultJoinDecoder
 
 DECODERS: dict[str, type[Decoder]] = {
     cls.name: cls
     for cls in (PyMatchingDecoder, CubeCollapseDecoder,
                 UnionFind3DDecoder, HierarchicalDecoder, HierarchicalPartialDecoder, MWPM3DDecoder,
-                ThreeTierDecoder, UnionFind3DCorrelatedDecoder, UFEnsembleDecoder)
+                ThreeTierDecoder, UnionFind3DCorrelatedDecoder, UFEnsembleDecoder, FaultJoinDecoder)
 }
 
 
