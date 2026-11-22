@@ -191,10 +191,12 @@ def _legend(fig, handles, y: float = 0.875) -> float:
     return y - rows * row_h - 0.09
 
 
-def _footer(fig, lines: list[str]) -> None:
+def _footer(fig, lines: list[str]) -> int:
+    """Wrapped footer at the bottom of the figure; returns the number of printed lines."""
     width = int(fig.get_figwidth() * 11.0)
     wrapped = [w for line in lines for w in textwrap.wrap(line, width)]
     fig.text(0.06, 0.015, "\n".join(wrapped), fontsize=10.5, color=INK_2, va="bottom", linespacing=1.5)
+    return len(wrapped)
 
 
 def machine_line(meta: dict) -> str:
@@ -269,9 +271,9 @@ def plot_accuracy_runtime(rows: list[dict], meta: dict | None = None, show_multi
     meta = {**meta, "threads_note": meta.get("threads_note") or
             (f"filled = 1 thread, hollow = {multi[-1]} numba threads" if multi
              else "every decoder single-thread (PyMatching too)")}
-    _footer(fig, ["Lower and further left is better. Whiskers show 95% Wilson intervals for the failure "
-                  "rate. Batch time = one decode call over all shots / shots.", machine_line(meta)])
-    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.18)
+    nlines = _footer(fig, ["Lower and further left is better. Whiskers show 95% Wilson intervals for the "
+                           "failure rate. Batch time = one decode call over all shots / shots.", machine_line(meta)])
+    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.14 + 0.04 * nlines, wspace=0.18)
     return fig
 
 

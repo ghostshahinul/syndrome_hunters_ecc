@@ -39,6 +39,7 @@ pip install -e ".[dev]"            # numpy, stim, pymatching, numba, matplotlib,
 
 | Task | Command |
 |---|---|
+| **One-minute demo:** PyMatching vs UnionFind3D vs Hierarchical at p = 0.5%, d = 7 (table + `results/plots/demo_latest.png`) | `python -m scripts.demo` |
 | Run the test suite (writes test plots to `results/tests/<run>/`) | `python -m pytest -q` |
 | Full benchmark + every standard figure (about 3 min on the laptop) | `python -m src.benchmark` or `make benchmark` |
 | Quick smoke benchmark into a scratch folder | `python -m src.benchmark --quick --out scratch_results` |

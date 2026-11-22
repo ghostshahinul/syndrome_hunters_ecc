@@ -832,3 +832,28 @@ p = 0.5%, single thread, numba cache cleared, Best-performance power mode, commi
    - per-cluster frontier lists in the growth loop (today every round scans all visited nodes);
    - reusing pass 1's grown supports to warm-start pass 2;
    - a cheaper pass-1/pass-2 split on large clusters only.
+
+Phase F commit: `b76623a` (pushed). That is the demo baseline.
+
+---
+
+# Final optimization round (from 01:27): cut pass-2 work in Hierarchical
+
+## Step 0: demo safety, on main (01:27 to 01:36)
+- **Fresh-clone smoke test** of the README quickstart, from GitHub at `b76623a`, in a new venv with Python 3.14.7:
+  - `pip install -e ".[dev]"` succeeds;
+  - **`python -m pytest -q`: 732 passed, 24 skipped, 1 xfailed** (154 s);
+  - `python -m src.benchmark --quick … --out scratch_results` writes all its figures;
+  - `import src` works even from outside the repo root.
+  - `src/__init__.py` is **not** needed and was not touched.
+- **`scripts/demo.py`** (`python -m scripts.demo`): p = 0.5%, d = 7, 50k shots, single thread. It prints a
+  table and saves `results/plots/demo_latest.png`. Runtime: **36 s from a cold numba cache, 6 s warm**.
+  Output:
+
+  | decoder | failures | LER [95% CI] | µs/shot | vs PyMatching |
+  |---|---|---|---|---|
+  | PyMatching | 505 | 1.010% [0.926, 1.101] | 8.79 | 1.00× |
+  | UnionFind3D | 583 | 1.166% [1.076, 1.264] | 7.90 | LER ×1.15, time ×0.90 |
+  | Hierarchical | 414 | 0.828% [0.752, 0.911] | 18.05 | LER ×0.82, time ×2.05 |
+- **Figure fix:** `plot_accuracy_runtime`'s bottom margin now follows the number of footer lines; the
+  single-panel demo figure's footer had overlapped the x-axis label.
