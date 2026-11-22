@@ -21,8 +21,9 @@ each other.
 ## 1. The problem (0:45)
 - A surface-code decoder reads the detection events from d rounds of stabilizer measurements and
   has to say whether the logical qubit flipped, faster than the hardware produces new rounds.
-- We're scored on accuracy (logical failure rate) and speed (µs per shot). The real test
-  is whether the failure rate **falls as d grows**.
+- Judged on presentation, novelty, parallelizability, code quality and number of implemented
+  algorithms. Our yardsticks: logical failure rate and single-thread µs per shot against
+  PyMatching. The real test is whether the failure rate **falls as d grows**.
 - What we built: 8 decoders of our own (Cube-Collapse, Cube3D-Local, UnionFind3D,
   UF3D correlated, UF3D ensemble, Hierarchical, MWPM3D, Hierarchical + MWPM). PyMatching is
   used only as the yardstick.
@@ -73,15 +74,17 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
 - Tuning: weight resolution S=2 → 4 cut the d=9 failure rate from 1.14% to 0.88% for 1.19× time.
   Smallest-cluster-first growth made no measurable difference.
 - On the sweep figure UF falls with d for every p ≤ 0.5%. p = 0.8% is above threshold for
-  every decoder, PyMatching included. At p = 0.5%, UF's failure rate is 1.00–1.27× PyMatching's.
+  every decoder, PyMatching included. At p = 0.5%, plain UF's failure rate is 1.01–1.26×
+  PyMatching's at d = 3–9 (run 40).
 
 ## 6. Hierarchical (1:30)
 - Fast path (Cube3D-Local) on the 3D graph. Three rules clear mutually isolated pairs, pairs
   two steps apart, and isolated nodes next to the boundary. They're scheduled by graph coloring,
   so rules of one color never interact.
 - Whole-shot gate: if the shot has ≤ K=6 events and the rules clear all of them, we're done.
-  Otherwise UF decodes the whole shot. At d ≥ 5 it makes **exactly the same failures** as UF,
-  and it is within the CI at d=3.
+  Otherwise UF decodes the whole shot. At d ≥ 5 its failure rate matches its deep tier's
+  (UF3D correlated) to within 0.002 points (run 40). At d=3 the fast path costs about 6%:
+  1.703% vs 1.608% (run 40; the CIs just overlap, and they separate at 500k shots).
 - The figure shows the fast path deciding 94–99.7% of shots at d ≤ 5, p ≤ 0.2%, and 0% at
   d=9, p=0.5%. Single-thread speed-up over UF: 3.0× (d=3, p=0.1%), 1.5× (d=5), and about 1.0×
   where the fast path rarely applies.
@@ -103,8 +106,8 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
   ignores that. Stim's DEM tells us which edges come from one fault (the `^` components).
 - Two passes: UF once; make the DEM partners of the edges it used cheaper; UF again. Keep the
   second answer only if it is cheaper under a correlated score (this guard fixed a real bug).
-- Figure `operating_point_run22.png`: at p=0.5%, d=9, 0.496% vs PyMatching's 0.670%
-  (non-overlapping CIs, 250k shots), at about 2× PyMatching's single-thread time.
+- Figure `operating_point_run40.png`: at p=0.5%, d=9, 0.511% vs PyMatching's 0.670%
+  (non-overlapping CIs, 250k shots), at 1.54× PyMatching's single-thread time.
 
 ## 8. Results and limits (1:15)
 - Show the full operating-point figure and the README results table.
@@ -121,7 +124,7 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
   - Ensemble of 8–12 correlated UF variants: within correlated PyMatching's CI at d = 5/7, but 20–25×
     slower; it can spread one shot over 8 cores (58 µs at d=7).
 - Limits:
-  - Union-find is not MWPM; the gap grows with d (1.29× at d=9).
+  - Union-find is not MWPM; plain UF's gap grows with d (1.26× at d=9, run 40).
   - The fast path only pays off when shots are sparse.
   - All timings come from one laptop.
 - Third tier, measured: our own exact MWPM (MWPM3D; agrees with PyMatching on 16,771 of
