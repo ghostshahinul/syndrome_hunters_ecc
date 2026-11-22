@@ -988,3 +988,36 @@ cleared, Best-performance mode. Outputs: `results/optimization/final_step5_20261
 
 **Decision: merge.** The branch is faster (−14 to −23% at d = 5–9) with LER inside main's 95% CI at every
 d, the suite is green, and the lead over plain PyMatching still has non-overlapping CIs at d = 5/7/9.
+
+Step 5 commit: `25b4df8` (branch). **Merged into main** as `5660331` (no-ff); the suite on merged
+main: 799 passed, 24 skipped, 1 xfailed.
+
+## After the merge: figures and docs on main (02:19 to 02:27)
+- **Operating-point run 40** (`results/operating_point/operating_point_run40.{csv,png}`; 250k shots,
+  p = 0.5%, single thread, Best-performance mode, numba cache cleared):
+
+  | d | PyMatching | Correlated PM | UnionFind3D | UF3D correlated | **Hierarchical** | H ÷ PM |
+  |---|---|---|---|---|---|---|
+  | 3 | 1.656% · 0.28 µs | 1.625% · 0.85 | 1.667% · 0.56 | 1.608% · 0.81 | 1.703% [1.653, 1.755] · 0.45 | 1.61× |
+  | 5 | 1.383% [1.338, 1.429] · 2.31 | 1.076% · 6.51 | 1.523% · 2.47 | 1.234% · 4.53 | **1.236% [1.193, 1.280]** · 4.66 | 2.02× |
+  | 7 | 1.035% [0.996, 1.075] · 8.05 | 0.609% · 21.60 | 1.222% · 7.36 | 0.859% · 12.40 | **0.859% [0.823, 0.896]** · 12.70 | **1.58×** |
+  | 9 | 0.670% [0.638, 0.702] · 19.14 | 0.299% · 51.28 | 0.846% · 17.10 | 0.511% · 29.51 | **0.511% [0.484, 0.540]** · 29.55 | **1.54×** |
+- **Benchmark run 3** (`20261122_022050`, commit `5660331`) regenerated:
+  - `accuracy_runtime`, `cube_collapse_story`, `accuracy_runtime_sweep`, `fast_path_fraction` and
+    `thread_scaling` (`_latest`);
+  - `demo_latest` (d=7: Hierarchical 0.844% at 1.66× PyMatching in that 50k-shot run);
+  - `mwpm_tier_p0_5_latest` and `ensemble_vs_M_latest`, re-rendered from their CSVs.
+- **The gate at lower p** (sweep, 100k shots, single thread): at p = 0.2%, d=9, Hierarchical takes
+  8.34 µs (1.49× PyMatching), down from 14.45 µs in run 2, with 4 vs 3 failures (too few to compare).
+- **Docs updated:** the README headline and "Latest" results table, and slide 8 of `docs/talk_outline.md`.
+
+## VERDICT (final round)
+- **Speed vs plain PyMatching, single thread:** **1.58× at d=7 and 1.54× at d=9** (was 2.07× / 1.92×
+  on the demo baseline `b76623a`; −23% / −20% for Hierarchical). **The ≤ 1.0× target was not met.**
+- **Accuracy lead: held.** Non-overlapping 95% CIs vs plain PyMatching at d = 5/7/9 (run 40), and LER
+  inside main's CI at every d (Step 5).
+- **What worked:** the exact pass-2 skip (helps d=5 only) and the auto pass-2 gate on pass 1's largest
+  cluster (the main gain).
+- **What didn't** (all measured and reverted): frontier tracking (bit-identical, 0.96–1.02×), plus the
+  earlier skip-ahead growth, cluster-local pass 2 and online correlation.
+- **The power mode** is restored to Balanced at the end of the session.

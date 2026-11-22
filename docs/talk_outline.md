@@ -109,11 +109,14 @@ Draw 5 data qubits in a line, `D1 D2 D3 D4 D5`, with 4 parity checks between nei
 ## 8. Results and limits (1:15)
 - Show the full operating-point figure and the README results table.
   - Accuracy: with correlated UF as the deep tier, Hierarchical **beats plain PyMatching** at
-    d = 5/7/9 with non-overlapping CIs (250k shots, run 31; d=7: 0.835% vs 1.035%; d=9: 0.496% vs
+    d = 5/7/9 with non-overlapping CIs (250k shots, run 40; d=7: 0.859% vs 1.035%; d=9: 0.511% vs
     0.670%). Correlated PyMatching is still better (0.609% / 0.299%).
-  - Speed, single thread vs single thread: 2.07× (d=7) and 1.92× (d=9) plain PyMatching, 0.72–0.76×
-    correlated PyMatching. Honest note: we tried to get under 1.0× overnight (skip-ahead growth,
-    cluster-local pass 2, online correlation) and measured every attempt: none of them got there.
+  - Speed, single thread vs single thread: **1.58× (d=7) and 1.54× (d=9)** plain PyMatching, down from
+    about 2× in one night. The trick: the second correlated pass changes the answer on only about 0.6%
+    of shots, so we run it only when the first pass built a big cluster (exact skip plus a gate fitted
+    within the CI).
+  - Honest note: ≤ 1.0× is not reached. We measured and reverted skip-ahead growth, cluster-local
+    pass 2, frontier lists and online correlation. The growth loop's own increments are the floor.
   - Every single DEM fault is decoded exactly (lookup table), and 39% of d=3 shots never reach UF.
   - Ensemble of 8–12 correlated UF variants: within correlated PyMatching's CI at d = 5/7, but 20–25×
     slower; it can spread one shot over 8 cores (58 µs at d=7).
