@@ -857,3 +857,27 @@ Phase F commit: `b76623a` (pushed). That is the demo baseline.
   | Hierarchical | 414 | 0.828% [0.752, 0.911] | 18.05 | LER ×0.82, time ×2.05 |
 - **Figure fix:** `plot_accuracy_runtime`'s bottom margin now follows the number of footer lines; the
   single-panel demo figure's footer had overlapped the x-axis label.
+
+Step 0 commit on main: `aaf0e88` (pushed). **Main stays here for the demo.** Steps 1 and later are on
+branch **`opt/overnight`**.
+
+## Step 1: measure pass 2 (branch, 01:37 to 01:45)
+Script `scripts/opt2_measure.py`, CSV `results/optimization/final_step1_20261122_014401.csv`.
+Setup: 50k shots, p = 0.5%, numba cache cleared, Best-performance mode, single thread. The fractions
+come from the instrumented reference, which is bit-identical to numba (new counters:
+`pass2_changed_obs`, `pass2_needed`).
+
+| d | pass 2 runs | kept | **changes the prediction** | runs but no shortened edge touches a pass-1 node | pass 1 (plain UF) | pass 2 (≈ corr − plain) | local tier | Hierarchical | PyMatching |
+|---|---|---|---|---|---|---|---|---|---|
+| 5 | 98.09% | 18.56% | **0.682%** | 22.20% | 2.58 µs | 3.41 | 0.50 | 5.73 | 2.37 |
+| 7 | 100.00% | 43.20% | **0.638%** | 1.54% | 7.54 | 9.32 | 0.61 | 17.20 | 8.17 |
+| 9 | 100.00% | 64.37% | **0.552%** | 0.01% | 18.00 | 21.28 | 1.43 | 39.04 | 20.04 |
+
+**Readout**
+- **Pass 2 costs as much as pass 1** but changes the predicted observable on only about 0.6% of
+  shots. It is often "kept" (a different, lower-score correction) without changing the logical outcome.
+- **The exact skip (Step 2)** can only remove pass 2 on 22% of shots at d=5, 1.5% at d=7 and 0.01% at
+  d=9. Almost no effect at d ≥ 7.
+- **The real lever is Step 3:** a cheap predictor that finds the about 0.6% of shots where pass 2
+  matters. The best possible gate would cut Hierarchical to about pass 1 + local ≈ 0.98× PyMatching
+  (d=7) and 0.97× (d=9).

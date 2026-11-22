@@ -362,7 +362,11 @@ def uf_correlated_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.n
                         result = (b3, f3, ok3, st3)
                         kept3 = True
     if stats is not None:
-        stats.update(pass3_ran=ran3, pass3_kept=kept3)
+        stats.update(pass3_ran=ran3, pass3_kept=kept3, pass2_changed_obs=int(result[0]) != int(bits))
+        changed_e = np.flatnonzero(len2 != t.length)
+        lab1 = st1["labels"]
+        stats["pass2_needed"] = any(int(x) in lab1 for e in changed_e for x in (g.edge_u[e], g.edge_v[e])
+                                    if int(x) != g.boundary)
         stats.update(result[3])
         # pass-1 clusters that contain an endpoint of a reweighted edge
         changed = np.flatnonzero(len2 != t.length)
