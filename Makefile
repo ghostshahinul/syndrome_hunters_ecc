@@ -8,7 +8,7 @@ endif
 DISTANCES ?= 3 5 7
 PS        ?= 0.001 0.003 0.005 0.007 0.01
 SHOTS     ?= 50000
-DECODERS  ?= fault_join pymatching pymatching_correlated union_find
+DECODERS  ?= free_energy_matching pymatching pymatching_correlated pymatching_correlated_regrouped union_find
 SEED      ?= 20261121
 BASIS     ?= z
 PLOT_FILES ?=

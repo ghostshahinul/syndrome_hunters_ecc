@@ -1,7 +1,7 @@
 [project]
 name = "syndrome-hunters-ecc"
 version = "0.1.0"
-description = "FaultJoin surface-code decoder and reproducible Stim benchmarks"
+description = "Free-energy matching surface-code decoder and reproducible Stim benchmarks"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

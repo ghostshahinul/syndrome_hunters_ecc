@@ -24,11 +24,12 @@ from src.data import Samples, default_path, load, sample
 from src.decoders import DECODERS, get_decoder
 
 RESULTS_DIR = Path("results")
+CANDIDATE = "free_energy_matching"  # the decoder the paired columns compare against
 FIELDS = [
     "decoder", "distance", "rounds", "p", "basis", "shots", "seed", "sample_sha256",
     "num_errors", "logical_error_rate", "ler_stderr", "ler_low95", "ler_high95",
     "ref_only_errors", "decoder_only_errors", "paired_p",
-    "fault_join_only_errors", "alternative_only_errors", "vs_fault_join_p",
+    "candidate_only_errors", "alternative_only_errors", "vs_candidate_p",
     "init_s", "warmup_s", "decode_s", "us_per_shot", "single_p50_us", "single_p95_us",
     "py_peak_mem_mb", "batch_size", "repeats", "latency_shots",
 ]
@@ -154,13 +155,13 @@ def benchmark(decoder_names, distances, ps, shots, basis="z", seed=0, *, rounds=
                     discordant = ref_only + own_only
                     row.update(ref_only_errors=ref_only, decoder_only_errors=own_only,
                                paired_p=binomtest(own_only, discordant).pvalue if discordant else 1.0)
-                if "fault_join" in scores:
-                    ours = scores["fault_join"][1]
+                if CANDIDATE in scores:
+                    ours = scores[CANDIDATE][1]
                     ours_only = int((ours & ~wrong).sum())
                     other_only = int((wrong & ~ours).sum())
                     pairs = ours_only + other_only
-                    row.update(fault_join_only_errors=ours_only, alternative_only_errors=other_only,
-                               vs_fault_join_p=binomtest(ours_only, pairs).pvalue if pairs else 1.0)
+                    row.update(candidate_only_errors=ours_only, alternative_only_errors=other_only,
+                               vs_candidate_p=binomtest(ours_only, pairs).pvalue if pairs else 1.0)
                 rows.append(row)
     return rows
 

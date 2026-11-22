@@ -33,7 +33,7 @@ def test_no_detections_means_no_flip(decoder):
     assert not out.any()
 
 
-@pytest.mark.parametrize("name", ["fault_join", "union_find", "pymatching"])
+@pytest.mark.parametrize("name", ["free_energy_matching", "union_find", "pymatching"])
 def test_every_single_fault_is_corrected(name, small_dem):
     decoder = DECODERS[name](small_dem)
     cases = single_fault_cases(small_dem)

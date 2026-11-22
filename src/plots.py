@@ -15,13 +15,14 @@ from matplotlib.colors import CenteredNorm, LinearSegmentedColormap, SymLogNorm
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
 import numpy as np
 
-from src.evaluate import RESULTS_DIR, wilson
+from src.evaluate import CANDIDATE, RESULTS_DIR, wilson
 
 FIGURES_DIR = Path("figures")
 STYLES = {
-    "fault_join": ("FaultJoin", "#006e67", "o"),
+    "free_energy_matching": ("Free-energy matching", "#006e67", "o"),
     "pymatching": ("PyMatching", "#4368a9", "s"),
     "pymatching_correlated": ("Correlated PyMatching", "#a94e16", "^"),
+    "pymatching_correlated_regrouped": ("Correlated, regrouped model", "#b08a1e", "v"),
     "union_find": ("Weighted union–find", "#795789", "D"),
 }
 DISTANCE_COLORS = ["#206493", "#bd581b", "#178062", "#84529a", "#614839"]
@@ -216,9 +217,9 @@ def plot_tradeoff(rows, out_dir=FIGURES_DIR, p=None):
 
 
 def plot_baseline_comparison(rows, out_dir=FIGURES_DIR):
-    """Compare FaultJoin with the best observed control for each metric and point."""
-    controls = {r["decoder"] for r in rows} - {"fault_join"}
-    if not controls or not any(r["decoder"] == "fault_join" for r in rows):
+    """Compare the candidate with the best observed control for each metric and point."""
+    controls = {r["decoder"] for r in rows} - {CANDIDATE}
+    if not controls or not any(r["decoder"] == CANDIDATE for r in rows):
         return None
     distances = sorted({r["distance"] for r in rows})
     noise = sorted({r["p"] for r in rows})
@@ -231,9 +232,9 @@ def plot_baseline_comparison(rows, out_dir=FIGURES_DIR):
     for i, distance in enumerate(distances):
         for j, p in enumerate(noise):
             group = by_point.get((distance, p), {})
-            if "fault_join" not in group or not controls.issubset(group):
+            if CANDIDATE not in group or not controls.issubset(group):
                 continue
-            candidate = group["fault_join"]
+            candidate = group[CANDIDATE]
             best_rate = min(group[name]["logical_error_rate"] for name in controls)
             fastest = min(group[name]["us_per_shot"] for name in controls)
             delta[i, j] = round(10000 * (candidate["logical_error_rate"] - best_rate), 9)
@@ -248,12 +249,12 @@ def plot_baseline_comparison(rows, out_dir=FIGURES_DIR):
     log_span = max(1., np.nanmax(abs(log_ratio))) if np.isfinite(log_ratio).any() else 1.
     fig, axes = plt.subplots(1, 2, figsize=(max(12, 1.5 * len(noise)), max(6.2, 3.3 + .65 * len(distances))))
     fig.subplots_adjust(left=.075, right=.965, top=.71, bottom=.275, wspace=.22)
-    _header(fig, rows, "FaultJoin across physical noise levels", "observed baseline at each point")
+    _header(fig, rows, "Free-energy matching across physical noise levels", "observed baseline at each point")
     panels = [
         (delta, delta, SymLogNorm(linthresh=1., vmin=-span, vmax=span),
-         "Excess failures per 10,000 shots", "Negative values favor FaultJoin"),
+         "Excess failures per 10,000 shots", "Negative values favor free-energy matching"),
         (log_ratio, ratio, CenteredNorm(vcenter=0, halfrange=log_span),
-         "Batch time relative to the fastest baseline", "Values below 1× favor FaultJoin"),
+         "Batch time relative to the fastest baseline", "Values below 1× favor free-energy matching"),
     ]
     for panel, (ax, (heat, labels, norm, title, guide)) in enumerate(zip(axes, panels)):
         ax.imshow(np.ma.masked_invalid(heat), norm=norm, cmap=colors, aspect="auto", interpolation="nearest")
