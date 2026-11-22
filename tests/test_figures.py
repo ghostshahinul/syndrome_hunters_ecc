@@ -90,9 +90,11 @@ def test_csv_roundtrip_types(accuracy_rows):
 
 
 def test_style_registry_unique_and_covers_decoders():
-    colors = [s.color for s in STYLES.values()]
     markers = [s.marker for s in STYLES.values()]
-    assert len(set(colors)) == len(colors) and len(set(markers)) == len(markers)
+    assert len(set(markers)) == len(markers)  # marker alone identifies every decoder
+    families = {"UnionFind3D", "UF3D correlated", "UF3D ensemble", "UF3D correlated ensemble"}
+    colors = [s.color for n, s in STYLES.items() if n not in families - {"UnionFind3D"}]
+    assert len(set(colors)) == len(colors)  # hues unique except within the UF family
     for name in ("pymatching", "cube_collapse", "union_find_3d", "hierarchical", "hierarchical_partial"):
         assert name in DECODERS and display_name(name) in STYLES
     assert style_for("union_find_3d") == STYLES["UnionFind3D"]

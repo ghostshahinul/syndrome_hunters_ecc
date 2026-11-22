@@ -386,3 +386,59 @@ No answer to the [ASK] within 10 minutes, so I took B, as the plan says.
    slots are taken.
 7. **Timing caveat:** Windows always reports 2100 MHz, and absolute µs drift between sessions.
    Compare only within one CSV.
+
+---
+
+# New goal (from 21:05): beat plain PyMatching's accuracy within its speed range
+
+## Item 1: correlated two-pass UnionFind3D, `uf3d_correlated` (21:05 to 21:30, time-box 2 h)
+
+**What was built**
+- **Graph:** `build_detector_graph` now also records **edge correlations**. For every DEM error
+  instruction whose `^`-separated components map to ≥ 2 graph edges, each ordered pair (e, f)
+  gets the probability that such an instruction fires (CSR: `corr_ptr`, `corr_idx`,
+  `corr_joint`). Circuit-level d=7: 1,512 of 1,558 edges have partners (7,654 pairs), median
+  P(f|e) = 0.067. Code capacity has none.
+- **UF** (`UnionFind3DConfig(correlated=True)`; registry `uf3d_correlated`):
+  - **Pass 1:** normal UF.
+  - **Pass 2:** every partner f of a pass-1 edge e gets the integer length of
+    P(f|e) = P(e, f) / p_e, clipped to [p_f, 0.5], on the same S=4 scale, for this shot only.
+    Then UF runs again.
+  - **Choosing the result (deviation from the plan):** pass 2 is kept only if its correlated
+    score is strictly lower: Σ L_e minus, for each DEM partner pair inside the correction,
+    max(0, L_e + L_f − L_joint). Without this check, pass 1's *alternative-but-equivalent*
+    edges pulled in their own partners and broke 2 single faults at d=3. It still does for 2
+    instructions (see below).
+  - **numba vs reference:** a numba kernel (two `_uf_shot` calls; partner lengths precomputed;
+    combined with order-independent `min`) is bit-identical to the Python reference: predictions,
+    corrections, ok and max_cluster, 3 tiers × d = 3/5/7.
+- **Tests:**
+  - every single DEM component is exact;
+  - syndrome consistency on 2,000 random shots per case;
+  - numba equals the reference;
+  - full DEM instructions: exact on every tier and distance **except circuit d=3**: 2 of 286
+    wrong ("D5 D16 ^ D9 ^ D12" and "D7 D18 ^ D14 ^ D11", p = 3.3e-4; pass 2's pairing of two
+    likelier correlated faults scores 16 vs 17). **Correlated PyMatching also mis-decodes 1 of
+    these 286.** This is documented as `single_fault_allowance = 2` on the decoder class (a new
+    base-class attribute, default 0).
+- **Hazard found:** numba's on-disk cache does not notice changes to callees in another file.
+  After `_uf_shot`'s workspace changed, the cached Hierarchical kernel crashed with an access
+  violation. Clearing `src/decoders/cube3d/__pycache__/*.nbi|*.nbc` fixed it. **If you edit
+  union_find.py or local.py, clear that cache.**
+
+**Benchmark** (operating-point run 17, `results/operating_point/operating_point_run17.csv`):
+p = 0.5%, 50k shots, seed 0, single thread. The machine was about 1.8× slower than at 20:00,
+so the µs below are only comparable with each other.
+
+| d | PyMatching | Correlated PyMatching | UnionFind3D | **UF3D correlated** | µs/shot: PM, corrPM, UF, UF-corr |
+|---|---|---|---|---|---|
+| 3 | 1.704% [1.594, 1.821] | 1.648% [1.540, 1.763] | 1.710% [1.600, 1.827] | 1.712% [1.602, 1.829] | 0.47, 1.75, 1.08, 2.27 |
+| 5 | 1.384% [1.285, 1.490] | 1.074% [0.987, 1.168] | 1.498% [1.395, 1.608] | 1.260% [1.166, 1.362] | 4.60, 11.50, 4.85, 10.66 |
+| 7 | 1.010% [0.926, 1.101] | 0.628% [0.562, 0.701] | 1.166% [1.076, 1.264] | **0.828% [0.752, 0.911]** | 15.22, 42.37, 12.86, 28.98 |
+| 9 | 0.690% [0.621, 0.766] | 0.278% [0.236, 0.328] | 0.876% [0.798, 0.962] | **0.512% [0.453, 0.578]** | 36.09, 105.73, 32.16, 63.25 |
+
+**Verdict:** UF3D correlated **beats plain PyMatching with non-overlapping 95% CIs at d = 7 and
+d = 9**. It does not at d = 5 (CIs overlap; 1.260% vs 1.384%) or d = 3 (equal). Single-thread it
+costs 1.75–1.9× PyMatching's time at d = 7/9, 2.3× at d=5 and 4.8× at d=3. That is not yet
+"within PyMatching's speed range": it sits between plain PyMatching and correlated PyMatching
+(0.60–0.68× of correlated PyMatching's time). Correlated PyMatching remains more accurate.

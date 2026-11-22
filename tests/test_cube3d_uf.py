@@ -128,3 +128,84 @@ def test_config_validation():
         UnionFind3DConfig(growth="largest")
     with pytest.raises(ValueError):
         UnionFind3DConfig(scale=0)
+
+
+# ---- correlated two-pass UF -------------------------------------------------------------
+def corr_engine(tier, d):
+    g = detector_graph(tier, d, TIER_P[tier])
+    return g, UnionFind3D(g, UnionFind3DConfig(correlated=True))
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_correlated_every_single_component(tier, d):
+    g, uf = corr_engine(tier, d)
+    edges = np.arange(g.n_edges)
+    res = uf.run(dets_for_edges(g, edges), record_correction=True)
+    assert res.ok.all()
+    np.testing.assert_array_equal(res.predictions, g.edge_obs[edges])
+    np.testing.assert_array_equal(g.syndrome(res.correction), dets_for_edges(g, edges).astype(bool))
+
+
+# Correlated decoding is not exact on every single fault in general: correlated PyMatching
+# mis-decodes 1 of the 286 circuit-level d=3 instructions. Ours mis-decodes 2 there: the
+# three-component instructions "D5 D16 ^ D9 ^ D12" and "D7 D18 ^ D14 ^ D11" (p = 3.3e-4),
+# where pass 2 finds a pairing of two likelier correlated faults (score 16 vs 17). Every
+# other tier and distance (up to 6,602 instructions at circuit d=7) is exact.
+CORRELATED_SINGLE_FAULT_ALLOWANCE = {("circuit", 3): 2}
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_correlated_every_full_dem_instruction(tier, d, report):
+    g, uf = corr_engine(tier, d)
+    dem = tier_circuit(tier, d, TIER_P[tier]).detector_error_model(decompose_errors=True)
+    rows, truth = [], []
+    for inst in dem.flattened():
+        if inst.type != "error":
+            continue
+        r = np.zeros(g.n_det, dtype=np.uint8)
+        o = np.zeros(g.n_obs, dtype=bool)
+        for t in inst.targets_copy():
+            if t.is_relative_detector_id():
+                r[t.val] ^= 1
+            elif t.is_logical_observable_id():
+                o[t.val] ^= True
+        rows.append(r)
+        truth.append(o)
+    res = uf.run(np.array(rows))
+    wrong = int((res.predictions != np.array(truth)).any(axis=1).sum())
+    report.add("uf3d_correlated_single_fault_wrong", tier, f"d={d}", wrong, ylabel="DEM instructions mis-decoded")
+    assert res.ok.all() and wrong <= CORRELATED_SINGLE_FAULT_ALLOWANCE.get((tier, d), 0)
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_correlated_syndrome_consistency(tier, d):
+    g, uf = corr_engine(tier, d)
+    dets, _ = sample(tier, d, 2000, seed=d + 50)
+    res = uf.run(dets, record_correction=True)
+    assert res.ok.all()
+    np.testing.assert_array_equal(g.syndrome(res.correction), dets)
+
+
+@pytest.mark.parametrize("tier,d", CASES)
+def test_correlated_numba_bit_identical_to_reference(tier, d):
+    g, uf = corr_engine(tier, d)
+    dets, _ = sample(tier, d, 300 if d < 7 else 100, seed=200 + d)
+    ref = uf.run(dets, record_correction=True, backend="reference")
+    fast = uf.run(dets, record_correction=True, backend="numba")
+    np.testing.assert_array_equal(fast.predictions, ref.predictions)
+    np.testing.assert_array_equal(fast.correction, ref.correction)
+    np.testing.assert_array_equal(fast.ok, ref.ok)
+    np.testing.assert_array_equal(fast.max_cluster, ref.max_cluster)
+
+
+def test_correlated_lengths_never_exceed_base():
+    g, uf = corr_engine("circuit", 5)
+    t = uf.tables
+    src = np.repeat(np.arange(g.n_edges), np.diff(t.corr_ptr))
+    assert len(t.corr_idx) > 0 and (t.corr_len <= t.length[t.corr_idx]).all() and (t.corr_len >= 1).all()
+    assert not np.any(t.corr_idx == src)
+
+
+def test_correlated_registered():
+    from src.decoders import DECODERS
+    assert "uf3d_correlated" in DECODERS

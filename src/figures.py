@@ -61,6 +61,10 @@ STYLES: dict[str, Style] = {
     # The 8 palette slots are used up; the two MWPM series take neutral inks + unique markers.
     "MWPM3D":                 Style("#52514e", "h"),
     "Hierarchical + MWPM":    Style("#0b0b0b", "p"),
+    # UF variants: same hue as UnionFind3D (family), distinct marker (variant).
+    "UF3D correlated":        Style("#e87ba4", "d"),
+    "UF3D ensemble":          Style("#e87ba4", ">"),
+    "UF3D correlated ensemble": Style("#e87ba4", "<"),
 }
 FALLBACK = Style(MUTED, "o")
 
@@ -74,6 +78,8 @@ DISPLAY_NAMES = {
     "cube3d_local": "Cube3D-Local",
     "mwpm_3d": "MWPM3D",
     "hierarchical_mwpm": "Hierarchical + MWPM",
+    "uf3d_correlated": "UF3D correlated",
+    "uf3d_ensemble": "UF3D ensemble",
 }
 
 # ordinal ramp for distance (sequential blue, steps 250 -> 700), plus a marker per d

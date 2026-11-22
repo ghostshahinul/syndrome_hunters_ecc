@@ -32,7 +32,7 @@ round, which is what makes the numba kernel bit-identical to the Python referenc
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numba
 import numpy as np
@@ -54,6 +54,7 @@ class UnionFind3DConfig:
     backend: str = "numba"
     scale: int = 4
     growth: str = "all"
+    correlated: bool = False  # two-pass: reweight partners of pass-1 edges, decode again
 
     def __post_init__(self) -> None:
         if self.backend not in UF_BACKENDS:
@@ -69,13 +70,38 @@ class UFTables:
     length: np.ndarray   # (E,) int32 integer edge lengths
     b_inc: np.ndarray    # (B,) int32 boundary edges, ascending id
     smallest: bool = False  # growth rule: only minimum-size active clusters grow
+    corr_ptr: np.ndarray | None = None  # (E+1,) int32 CSR over partner edges (see graph.corr_*)
+    corr_idx: np.ndarray | None = None  # (P,) int32 partner f
+    corr_len: np.ndarray | None = None  # (P,) int32 length of f given e is in the correction
+    corr_credit: np.ndarray | None = None  # (P,) int32 max(0, L_e + L_f - L_joint): pair bonus
+
+
+def length_of(w: np.ndarray, w_min: float, scale: int) -> np.ndarray:
+    return np.maximum(1, np.rint(float(scale) * w / w_min)).astype(np.int32)
 
 
 def build_uf_tables(g: DetectorGraph3D, scale: int = 4, growth: str = "all") -> UFTables:
     w = g.edge_weight
-    length = np.maximum(1, np.rint(float(scale) * w / w.min())).astype(np.int32)
+    w_min = float(w.min())
+    length = length_of(w, w_min, scale)
     b_inc = np.flatnonzero(g.edge_v == g.boundary).astype(np.int32)
-    return UFTables(length, b_inc, growth == "smallest")
+    ptr = g.corr_ptr if g.corr_ptr is not None else np.zeros(g.n_edges + 1, np.int32)
+    idx = g.corr_idx if g.corr_idx is not None else np.zeros(0, np.int32)
+    joint = g.corr_joint if g.corr_joint is not None else np.zeros(0)
+    # P(f | e) ~ P(e and f) / P(e), clipped to [p_f, 0.5]; length on the same integer scale
+    src = np.repeat(np.arange(g.n_edges), np.diff(ptr))
+    cond = np.clip(joint / g.edge_prob[src], g.edge_prob[idx], 0.5) if len(idx) else np.zeros(0)
+    cond = np.minimum(cond, 0.5 - 1e-12)
+    corr_len = np.minimum(length_of(np.log((1 - cond) / cond), w_min, scale), length[idx]) \
+        if len(idx) else np.zeros(0, np.int32)
+    # Score bonus when a correction contains both e and f: the pair is likelier as one fault
+    # (probability P(e and f)) than as two independent ones.
+    pj = np.clip(joint, 1e-15, 0.5 - 1e-12) if len(idx) else np.zeros(0)
+    credit = np.maximum(0, length[src] + length[idx] - length_of(np.log((1 - pj) / pj), w_min, scale)) \
+        if len(idx) else np.zeros(0, np.int32)
+    return UFTables(length, b_inc, growth == "smallest", np.ascontiguousarray(ptr, np.int32),
+                    np.ascontiguousarray(idx, np.int32), corr_len.astype(np.int32),
+                    credit.astype(np.int32))
 
 
 # ---- reference (idiomatic Python) -------------------------------------------------------
@@ -208,6 +234,48 @@ def uf_decode_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarr
     return bits, sorted(flipped), ok
 
 
+def correlated_lengths(t: UFTables, flipped) -> np.ndarray:
+    """Per-shot lengths for pass 2: every partner f of a pass-1 edge e gets
+    min(current length, length(P(f | e)))."""
+    len2 = t.length.copy()
+    for e in flipped:
+        for k in range(t.corr_ptr[e], t.corr_ptr[e + 1]):
+            f = t.corr_idx[k]
+            len2[f] = min(len2[f], t.corr_len[k])
+    return len2
+
+
+def correlated_score(t: UFTables, flipped) -> int:
+    """Correlated cost of a correction: sum of base lengths minus the pair credit of every
+    unordered DEM partner pair (e, f) that it contains."""
+    inside = set(int(e) for e in flipped)
+    score = sum(int(t.length[e]) for e in inside)
+    for e in inside:
+        for k in range(t.corr_ptr[e], t.corr_ptr[e + 1]):
+            f = int(t.corr_idx[k])
+            if f > e and f in inside:
+                score -= int(t.corr_credit[k])
+    return score
+
+
+def uf_correlated_shot_reference(g: DetectorGraph3D, t: UFTables, dets_row: np.ndarray,
+                                 stats: dict | None = None) -> tuple[int, list[int], bool]:
+    """Two-pass correlated UF on one shot (reference). Pass 2 reweights the DEM partners of
+    pass-1 edges; its correction is kept only if its correlated score is strictly lower."""
+    st1: dict = {}
+    bits, flipped, ok = uf_decode_shot_reference(g, t, dets_row, st1)
+    result = (bits, flipped, ok, st1)
+    len2 = correlated_lengths(t, flipped)
+    if not np.array_equal(len2, t.length):
+        st2: dict = {}
+        b2, f2, ok2 = uf_decode_shot_reference(g, replace(t, length=len2), dets_row, st2)
+        if correlated_score(t, f2) < correlated_score(t, flipped):
+            result = (b2, f2, ok2, st2)
+    if stats is not None:
+        stats.update(result[3])
+    return result[:3]
+
+
 # ---- numba kernel ---------------------------------------------------------------------
 # Shots are processed in chunks of CHUNK; each chunk allocates one scratch workspace and
 # resets only the entries a shot touched, so a shot costs O(cluster size), not O(n + E).
@@ -247,13 +315,15 @@ def uf_work(n, E):
             np.empty(n, np.int32),               # 15 BFS order
             np.empty(n + 1, np.int32),           # 16 queue
             np.zeros(n + 1, np.bool_),           # 17 defect
-            np.zeros(1, np.int32))               # 18 out: node count of the largest cluster
+            np.zeros(1, np.int32),               # 18 out: node count of the largest cluster
+            np.empty(n + 1, np.int32),           # 19 out: flipped edges (peeling order)
+            np.zeros(1, np.int32))               # 20 out: number of flipped edges
 
 
 @njit(cache=True)
 def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work):
     (parent, rank, parity, touches, size, in_cluster, visited, support, grown, newly,
-     active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat) = work
+     active, touched, marked, tree_edge, tree_parent, order, queue, defect, stat, flips, nflips) = work
     n = row.shape[0]
     B = n
     D = inc_edge.shape[1]
@@ -266,6 +336,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
             nvis += 1
     if nvis == 0:
         stat[0] = 0
+        nflips[0] = 0
         return np.uint64(0), True
     ntouched = 0
 
@@ -394,12 +465,15 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
         defect[v] = row[v] != 0
     bits = np.uint64(0)
     record = corr.shape[0] > 0
+    nf = 0
     for i in range(norder - 1, -1, -1):
         y = order[i]
         if defect[y]:
             e = tree_edge[y]
             p = tree_parent[y]
             bits ^= obs_bits[e]
+            flips[nf] = e
+            nf += 1
             if record:
                 corr[s, e] ^= 1
             defect[y] = False
@@ -412,6 +486,7 @@ def _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, sm
         if sz > mx:
             mx = sz
     stat[0] = mx
+    nflips[0] = nf
     # check and restore the workspace (only touched entries)
     for i in range(nvis):
         v = visited[i]
@@ -451,6 +526,94 @@ def _uf_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out
             out_size[s] = work[18][0]
 
 
+@njit(cache=True)
+def _corr_score(flips, nf, length, cptr, cidx, ccredit, inside):
+    """Correlated score of a correction (see correlated_score); `inside` is all-False on entry
+    and restored before returning."""
+    score = 0
+    for i in range(nf):
+        e = flips[i]
+        inside[e] = True
+        score += length[e]
+    for i in range(nf):
+        e = flips[i]
+        for k in range(cptr[e], cptr[e + 1]):
+            f = cidx[k]
+            if f > e and inside[f]:
+                score -= ccredit[k]
+    for i in range(nf):
+        inside[flips[i]] = False
+    return score
+
+
+@njit(cache=True)
+def _uf_correlated_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest,
+                        work, cptr, cidx, clen, ccredit, len2, mod, inside, keep, stat_keep):
+    """Pass 1 with `length`; pass 2 with the partners of pass-1 edges shortened; keep pass 2
+    only if its correlated score is strictly lower. `len2` must equal `length` on entry and
+    is restored. On return work[19..20] (flips) and work[18] (max cluster) describe the
+    kept pass."""
+    b, ok = _uf_shot(row, s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, smallest, work)
+    flips = work[19]
+    nf1 = work[20][0]
+    nm = 0
+    for i in range(nf1):
+        e = flips[i]
+        for k in range(cptr[e], cptr[e + 1]):
+            f = cidx[k]
+            L = clen[k]
+            if L < len2[f]:
+                if len2[f] == length[f]:
+                    mod[nm] = f
+                    nm += 1
+                len2[f] = L
+    if nm == 0:
+        return b, ok
+    score1 = _corr_score(flips, nf1, length, cptr, cidx, ccredit, inside)
+    for i in range(nf1):
+        keep[i] = flips[i]
+    stat_keep[0] = work[18][0]
+    b2, ok2 = _uf_shot(row, s, edge_u, edge_v, len2, inc_edge, b_inc, obs_bits, corr, smallest, work)
+    for i in range(nm):
+        len2[mod[i]] = length[mod[i]]
+    score2 = _corr_score(flips, work[20][0], length, cptr, cidx, ccredit, inside)
+    if score2 < score1:
+        return b2, ok2
+    for i in range(nf1):  # restore pass 1 as the reported correction
+        flips[i] = keep[i]
+    work[20][0] = nf1
+    work[18][0] = stat_keep[0]
+    return b, ok
+
+
+@njit(parallel=True, cache=True)
+def _uf_correlated_batch(dets, edge_u, edge_v, length, inc_edge, b_inc, obs_bits, corr, out_bits,
+                         out_ok, smallest, out_size, cptr, cidx, clen, ccredit):
+    S = dets.shape[0]
+    n = dets.shape[1]
+    E = edge_u.shape[0]
+    nchunk = (S + CHUNK - 1) // CHUNK
+    record = corr.shape[0] > 0
+    for ci in prange(nchunk):
+        work = uf_work(n, E)
+        len2 = length.copy()
+        mod = np.empty(E, np.int32)
+        inside = np.zeros(E, np.bool_)
+        keep = np.empty(n + 1, np.int32)
+        stat_keep = np.zeros(1, np.int32)
+        none = np.zeros((0, 0), np.uint8)
+        for s in range(ci * CHUNK, min(S, (ci + 1) * CHUNK)):
+            b, ok = _uf_correlated_shot(dets[s], s, edge_u, edge_v, length, inc_edge, b_inc, obs_bits,
+                                        none, smallest, work, cptr, cidx, clen, ccredit, len2, mod,
+                                        inside, keep, stat_keep)
+            out_bits[s] = b
+            out_ok[s] = ok
+            out_size[s] = work[18][0]
+            if record:  # correction of the final pass (each tree edge is flipped at most once)
+                for i in range(work[20][0]):
+                    corr[s, work[19][i]] = 1
+
+
 def bits_to_bool(bits: np.ndarray, n_obs: int) -> np.ndarray:
     return ((bits[:, None] >> np.arange(n_obs, dtype=np.uint64)) & np.uint64(1)).astype(bool)
 
@@ -483,13 +646,19 @@ class UnionFind3D:
         bits = np.zeros(S, dtype=np.uint64)
         ok = np.ones(S, dtype=bool)
         size = np.zeros(S, dtype=np.int32)
-        if backend == "numba":
+        correlated = self.config.correlated
+        if backend == "numba" and correlated:
+            _uf_correlated_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
+                                 g.edge_obs_bits, corr, bits, ok, t.smallest, size,
+                                 t.corr_ptr, t.corr_idx, t.corr_len, t.corr_credit)
+        elif backend == "numba":
             _uf_batch(dets, g.edge_u, g.edge_v, t.length, g.inc_edge, t.b_inc,
                       g.edge_obs_bits, corr, bits, ok, t.smallest, size)
         else:
+            shot_fn = uf_correlated_shot_reference if correlated else uf_decode_shot_reference
             for s in range(S):
                 st: dict = {}
-                b, flipped, good = uf_decode_shot_reference(g, t, dets[s], st)
+                b, flipped, good = shot_fn(g, t, dets[s], st)
                 bits[s], ok[s], size[s] = b, good, st["max_cluster"]
                 if record_correction:
                     corr[s, flipped] = 1
@@ -510,3 +679,16 @@ class UnionFind3DDecoder(Decoder):
 def set_threads(n: int) -> None:
     """Thread count for the numba backend."""
     numba.set_num_threads(n)
+
+
+class UnionFind3DCorrelatedDecoder(UnionFind3DDecoder):
+    """Two-pass correlated UF: pass 2 reweights the DEM partners of pass-1 edges."""
+
+    name = "uf3d_correlated"
+    # Like correlated PyMatching (1 of 286), correlated decoding is not exact on every single
+    # fault: at circuit-level d=3 two three-component hook instructions lose to a pairing of
+    # two likelier correlated faults. Exact on every fault at d >= 5 and on the other tiers.
+    single_fault_allowance = 2
+
+    def __init__(self, dem: stim.DetectorErrorModel, config: UnionFind3DConfig | None = None):
+        super().__init__(dem, config or UnionFind3DConfig(correlated=True))

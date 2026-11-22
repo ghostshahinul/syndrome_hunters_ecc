@@ -51,6 +51,10 @@ class DetectorGraph3D:
     inc_edge: np.ndarray      # (n_det, max_inc) int32 ALL incident edges (parallels, boundary), -1 padded
     n_components: int         # DEM components read (before merging)
     n_undetectable: int       # components with no detector (cannot be decoded; reported only)
+    # edge pairs produced by one error instruction: partners of e are corr_idx[corr_ptr[e]:corr_ptr[e+1]]
+    corr_ptr: np.ndarray | None = None    # (E+1,) int32
+    corr_idx: np.ndarray | None = None    # (P,) int32 partner edge f
+    corr_joint: np.ndarray | None = None  # (P,) float64 P(e and f from one instruction)
 
     @property
     def boundary(self) -> int:
@@ -78,22 +82,32 @@ class DetectorGraph3D:
         return ((corr @ self.edge_obs.astype(np.int64)) & 1).astype(bool)
 
 
-def _components(dem: stim.DetectorErrorModel):
-    """Yield (probability, detectors tuple, observables tuple) for every decomposed component."""
+def _instructions(dem: stim.DetectorErrorModel):
+    """Yield (probability, [(detectors tuple, observables tuple), ...]) per error instruction,
+    one entry per decomposed component (components are separated by ^ in the DEM)."""
     for inst in dem.flattened():
         if inst.type != "error":
             continue
         p = inst.args_copy()[0]
+        comps: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
         dets: list[int] = []
         obs: list[int] = []
         for target in inst.targets_copy() + [stim.target_separator()]:
             if target.is_separator():
-                yield p, tuple(sorted(dets)), tuple(sorted(obs))
+                comps.append((tuple(sorted(dets)), tuple(sorted(obs))))
                 dets, obs = [], []
             elif target.is_relative_detector_id():
                 dets.append(target.val)
             elif target.is_logical_observable_id():
                 obs.append(target.val)
+        yield p, comps
+
+
+def _components(dem: stim.DetectorErrorModel):
+    """Yield (probability, detectors tuple, observables tuple) for every decomposed component."""
+    for p, comps in _instructions(dem):
+        for dets, obs in comps:
+            yield p, dets, obs
 
 
 def _edge_type(c: np.ndarray, u: int, v: int, boundary: int) -> int:
@@ -179,11 +193,34 @@ def build_detector_graph(dem: stim.DetectorErrorModel) -> DetectorGraph3D:
     for a, lst in enumerate(incident):
         inc_edge[a, : len(lst)] = lst
 
+    # Correlations: edge pairs (e, f) produced together by one error instruction (e.g. the X
+    # and Z parts of a Y fault, or the two halves of a hook error), with the probability that
+    # at least one such instruction fires. CSR by e, partners f ascending.
+    key_id = {k: e for e, k in enumerate(keys)}
+    joint: dict[tuple[int, int], float] = defaultdict(float)
+    for p, comps in _instructions(dem):
+        es = sorted({key_id[(d[0], d[1] if len(d) == 2 else n, o)] for d, o in comps if d})
+        if len(es) < 2:
+            continue
+        for e in es:
+            for f in es:
+                if e != f:
+                    q = joint[(e, f)]
+                    joint[(e, f)] = q + p - q * p
+    pairs = sorted(joint)
+    corr_ptr = np.zeros(E + 1, dtype=np.int32)
+    for e, _ in pairs:
+        corr_ptr[e + 1] += 1
+    corr_ptr = np.cumsum(corr_ptr).astype(np.int32)
+    corr_idx = np.array([f for _, f in pairs], dtype=np.int32)
+    corr_joint = np.array([joint[k] for k in pairs], dtype=np.float64)
+
     arrays = (coords, edge_u, edge_v, edge_obs, obs_bits, prob, weight, etype,
               nbr, nbr_edge, degree, boundary_edge, inc_edge)
-    for arr in arrays:
+    for arr in arrays + (corr_ptr, corr_idx, corr_joint):
         arr.setflags(write=False)
-    return DetectorGraph3D(n, n_obs, *arrays, n_components=n_components, n_undetectable=n_undetectable)
+    return DetectorGraph3D(n, n_obs, *arrays, n_components=n_components, n_undetectable=n_undetectable,
+                           corr_ptr=corr_ptr, corr_idx=corr_idx, corr_joint=corr_joint)
 
 
 @lru_cache(maxsize=64)
