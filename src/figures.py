@@ -366,7 +366,7 @@ def plot_paper_style(rows: list[dict], meta: dict | None = None):
     ps = sorted({r["p"] for r in rows})
     with plt.rc_context(PAPER_RC):  # save inside plt.rc_context(PAPER_RC) too (tick labels draw late)
         n = len(distances)
-        fig, axes = plt.subplots(1, n, figsize=(4.3 * n, 6.2), sharey=True, facecolor="white", squeeze=False)
+        fig, axes = plt.subplots(1, n, figsize=(4.3 * n, 6.6), sharey=True, facecolor="white", squeeze=False)
         axes = axes[0]
         omitted = 0
         for i, (ax, d) in enumerate(zip(axes, distances)):
@@ -395,9 +395,16 @@ def plot_paper_style(rows: list[dict], meta: dict | None = None):
             ax.grid(True, which="major", ls=":", lw=0.7, color="0.65", zorder=0)
             ax.tick_params(labelsize=11, direction="out", which="both")
             ax.set_xlabel("Physical error rate $p$", fontsize=13)
-            ax.legend(loc="lower right", fontsize=10.5, framealpha=0.95, edgecolor="0.6", fancybox=False,
-                      handlelength=2.8, borderaxespad=0.4, labelspacing=0.3)
         axes[0].set_ylabel("Logical error rate per round", fontsize=13)
+        # one shared legend in neutral ink: line style + marker identify the decoder in every panel
+        handles = []
+        for name in decoders:
+            ls, marker, filled, ms = PAPER_STYLES.get(name, PAPER_FALLBACK)
+            handles.append(Line2D([], [], color="0.15", ls=ls, lw=1.4, marker=marker, ms=ms, mew=1.2,
+                                  mfc="0.15" if filled else "white", mec="0.15", label=name))
+        fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.995), ncol=len(handles),
+                   fontsize=12, frameon=True, edgecolor="0.6", fancybox=False, handlelength=3.2,
+                   columnspacing=2.2)
         shots = sorted({r["shots"] for r in rows})
         shots_txt = f"{shots[0]:,}" if len(shots) == 1 else f"{shots[0]:,}–{shots[-1]:,}"
         caption = (f"Logical error rate per round versus physical error rate $p$ for the rotated surface code "
@@ -414,11 +421,74 @@ def plot_paper_style(rows: list[dict], meta: dict | None = None):
         cap_in = 0.15 + 0.24 * len(wrapped)               # caption block height (inches)
         fig.text(0.05, 0.15 / H, "\n".join(wrapped), fontsize=12, va="bottom", ha="left", linespacing=1.35)
         bottom = (cap_in + 1.1) / H                        # + tick labels, x label, panel label
-        fig.subplots_adjust(left=0.065, right=0.99, top=0.97, bottom=bottom, wspace=0.08)
+        fig.subplots_adjust(left=0.065, right=0.99, top=1 - 0.6 / H, bottom=bottom, wspace=0.08)
         for i, (ax, d) in enumerate(zip(axes, distances)):
             pos = ax.get_position()
             fig.text((pos.x0 + pos.x1) / 2, (cap_in + 0.12) / H, f"({chr(97 + i)}) $d = {d}$",
                      ha="center", va="bottom", fontsize=13)
+    return fig
+
+
+# ---- LER vs p for slides: fewer series, bigger type ---------------------------------------
+# Four clearly distinct hues (no two from one family); Hierarchical takes blue here because its
+# registry green sits too close to Correlated PyMatching's teal at projector contrast.
+SLIDE_COLORS = {"PyMatching": "#eb6834", "Correlated PyMatching": "#1baf7a", "UnionFind3D": "#e87ba4",
+                "Hierarchical": "#2a78d6"}
+SLIDE_DECODERS = ("PyMatching", "Correlated PyMatching", "UnionFind3D", "Hierarchical")  # draw order
+
+
+def plot_slides(rows: list[dict], meta: dict | None = None, distances=(5, 7, 9), decoders=SLIDE_DECODERS):
+    """Projection version of plot_sweep: LER (%) vs p (%), log-log, one panel per distance,
+    one shared legend, large type. The last decoder (Hierarchical) is drawn last, 2.5x thicker."""
+    meta = meta or {}
+    rows = [r for r in rows if (r.get("threads") or 1) == 1 and r["d"] in distances and r["decoder"] in decoders]
+    distances = [d for d in distances if any(r["d"] == d for r in rows)]
+    ps = sorted({r["p"] for r in rows})
+    fig, axes = plt.subplots(1, len(distances), figsize=(6.2 * len(distances), 8.0), sharey=True,
+                             facecolor=SURFACE, squeeze=False)
+    axes = axes[0]
+    base_lw = 2.0
+    for ax, d in zip(axes, distances):
+        _axes_style(ax)
+        ax.grid(True, axis="x", which="major", color=GRID, lw=0.8, zorder=0)
+        for z, name in enumerate(decoders):
+            pts = sorted((r for r in rows if r["d"] == d and r["decoder"] == name and r["failures"] > 0),
+                         key=lambda r: r["p"])
+            if not pts:
+                continue
+            last = name == decoders[-1]
+            x = [100 * r["p"] for r in pts]
+            y = [100 * r["ler"] for r in pts]
+            lo = [100 * (r["ler"] - r["ci_low"]) for r in pts]
+            hi = [100 * (r["ci_high"] - r["ler"]) for r in pts]
+            ax.errorbar(x, y, yerr=[lo, hi], fmt="-" + style_for(name).marker, color=SLIDE_COLORS.get(name, MUTED),
+                        lw=base_lw * (2.5 if last else 1.0), ms=12 if last else 9, mec=SURFACE, mew=1.5,
+                        elinewidth=2, capsize=4, zorder=10 + z)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        _log_axis_plain(ax.xaxis, [100 * p for p in ps])
+        _log_axis_plain(ax.yaxis)
+        ax.tick_params(labelsize=15)
+        ax.set_title(f"Distance {d}", fontsize=20, color=INK, pad=12)
+        ax.set_xlabel("Physical error rate p (%)", fontsize=18, color=INK_2)
+    axes[0].set_ylabel("Logical failures per shot (%)", fontsize=18, color=INK_2)
+    shots = sorted({r["shots"] for r in rows})
+    fig.text(0.05, 0.985, "Logical failure rate vs physical error rate", fontsize=28, fontweight="bold",
+             color=INK, va="top")
+    fig.text(0.05, 0.915, f"Rotated surface code, Z memory  ·  rounds = d  ·  circuit-level noise  ·  "
+             f"{shots[0]:,} shots per point" + (f"  ·  run {meta['run']}" if meta.get("run") is not None else ""),
+             fontsize=16, color=INK_2, va="top")
+    handles = [Line2D([], [], color=SLIDE_COLORS.get(n, MUTED), marker=style_for(n).marker, mec=SURFACE,
+                      ms=12 if n == decoders[-1] else 10, lw=base_lw * (2.5 if n == decoders[-1] else 1.0), label=n)
+               for n in decoders]
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.045, 0.86), ncol=len(handles),
+               frameon=False, fontsize=17, handlelength=2.6, columnspacing=2.4)
+    note = ("Lower is better. Whiskers show 95% Wilson intervals. Hierarchical's deep tier is UF3D correlated "
+            "(not drawn; at d = 5–9 its failure counts are nearly identical to Hierarchical's).")
+    width = int(fig.get_figwidth() * 8.2)
+    lines = textwrap.wrap(note, width) + textwrap.wrap(machine_line(meta), width)
+    fig.text(0.05, 0.02, "\n".join(lines), fontsize=13.5, color=INK_2, va="bottom", linespacing=1.45)
+    fig.subplots_adjust(left=0.07, right=0.985, top=0.71, bottom=0.14 + 0.035 * len(lines), wspace=0.1)
     return fig
 
 

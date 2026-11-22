@@ -62,3 +62,15 @@ def test_distance_9_improves_on_distance_7(operating_points, decoder):
     ler = _ler(operating_points)
     d7, d9 = ler[(decoder, 7)], ler[(decoder, 9)]
     assert d9.ler_high < d7.ler_low, (decoder, d7.ler, d9.ler)
+
+
+def test_suppression_table_and_csv_roundtrip(tmp_path):
+    """Error-rate sweep helpers: P_L(d)/P_L(d+2) and reloading an operating-point CSV."""
+    from src.error_rate_sweep import load_operating_point, suppression, suppression_markdown
+    from src.operating_point import OperatingPoint, write_csv
+    rows = [{"p": 0.005, "decoder": "PyMatching", "d": d, "ler": v} for d, v in ((3, 0.02), (5, 0.01), (7, 0.0))]
+    sup = suppression(rows)
+    assert sup[(0.005, "PyMatching", 3)] == 2.0 and sup[(0.005, "PyMatching", 5)] is None
+    assert "| 0.5% | PyMatching | 2.00 | – |" in suppression_markdown(rows)
+    pt = OperatingPoint("PyMatching", 5, 5, 0.005, 100, 3, 0.03, 0.01, 0.08, 2.5, 2, 50, 2.0, 3.0)
+    assert load_operating_point(write_csv([pt], tmp_path / "op.csv")) == [pt]

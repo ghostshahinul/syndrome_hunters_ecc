@@ -160,3 +160,32 @@ def test_per_round_inverts_the_r_round_formula():
         p_shot = (1 - (1 - 2 * eps) ** r) / 2
         assert abs(per_round(p_shot, r) - eps) < 1e-12
     assert per_round(0.0, 7) == 0.0 and abs(per_round(0.01, 1) - 0.01) < 1e-15
+
+
+def test_slides(tmp_path):
+    rows = [_row(n, d, p, k=k) for d in (3, 5, 7, 9) for p in (0.003, 0.005)
+            for n, k in (("PyMatching", 9), ("Correlated PyMatching", 6), ("UnionFind3D", 11),
+                         ("UF3D correlated", 7), ("Hierarchical", 7))]
+    import matplotlib.pyplot as plt
+
+    from src.figures import SLIDE_COLORS, SLIDE_DECODERS, plot_slides
+    fig = plot_slides(_csv(tmp_path, "slides", rows), META)
+    assert len(fig.axes) == 3  # d = 5, 7, 9 only
+    assert len(set(SLIDE_COLORS[n] for n in SLIDE_DECODERS)) == 4
+    assert all(ax.xaxis.label.get_size() >= 16 for ax in fig.axes)
+    assert fig.axes[0].yaxis.label.get_size() >= 16 and fig.axes[0].xaxis.label.get_size() >= 16
+    widths = {line.get_color(): line.get_linewidth() for line in fig.axes[0].lines if line.get_linewidth() > 0}
+    assert widths[SLIDE_COLORS["Hierarchical"]] == 2.5 * widths[SLIDE_COLORS["PyMatching"]]
+    assert len(fig.legends) == 1
+    _check(fig, "slides", tmp_path)
+    plt.close("all")
+
+
+def test_paper_style_has_one_shared_legend(sweep_rows):
+    import matplotlib.pyplot as plt
+
+    from src.figures import PAPER_RC
+    with plt.rc_context(PAPER_RC):
+        fig = plot_paper_style(sweep_rows, META)
+    assert len(fig.legends) == 1 and all(ax.get_legend() is None for ax in fig.axes)
+    plt.close(fig)

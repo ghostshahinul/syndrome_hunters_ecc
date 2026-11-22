@@ -324,6 +324,48 @@ Hierarchical vs plain PyMatching, logical failures per shot, % [95% CI]:
   and Hierarchical's fast path costs a little (0.333% vs UF3D correlated 0.302%).
 - Time at p = 0.5% (run 44): Hierarchical ÷ PyMatching = 1.99× (d=5), 1.58× (d=7), 1.54× (d=9),
   matching run 40.
+- Slide version: `sweep_run1_slides.png` shows d = 5/7/9, four decoders, large type, with Hierarchical drawn last and thicker.
+  Replot every figure from the saved CSVs (no decoding) with
+  `python -m src.error_rate_sweep --replot 1 --op-run 44`. The replot also prints the table below.
+
+**Error suppression per +2 distance**, Λ = P_L(d) / P_L(d+2) from the per-shot failure rates
+(higher is better; Λ > 1 means the larger code fails less):
+
+| p | Decoder | d=3 → 5 | d=5 → 7 | d=7 → 9 |
+|---|---|---|---|---|
+| 0.2% | PyMatching | 3.01 | 3.29 | 4.28 |
+| 0.2% | Correlated PyMatching | 4.72 | 4.74 | 5.13 |
+| 0.2% | UnionFind3D | 2.68 | 3.43 | 3.02 |
+| 0.2% | Hierarchical | 3.88 | 3.70 | 4.64 |
+| 0.3% | PyMatching | 1.98 | 2.41 | 2.59 |
+| 0.3% | Correlated PyMatching | 2.82 | 3.36 | 3.58 |
+| 0.3% | UnionFind3D | 1.80 | 2.20 | 2.27 |
+| 0.3% | Hierarchical | 2.49 | 2.52 | 3.07 |
+| 0.4% | PyMatching | 1.48 | 1.83 | 1.79 |
+| 0.4% | Correlated PyMatching | 1.90 | 2.48 | 2.34 |
+| 0.4% | UnionFind3D | 1.39 | 1.63 | 1.70 |
+| 0.4% | Hierarchical | 1.77 | 1.92 | 1.98 |
+| 0.5% | PyMatching | 1.18 | 1.41 | 1.48 |
+| 0.5% | Correlated PyMatching | 1.49 | 1.81 | 1.97 |
+| 0.5% | UnionFind3D | 1.08 | 1.29 | 1.40 |
+| 0.5% | Hierarchical | 1.37 | 1.47 | 1.62 |
+| 0.6% | PyMatching | 1.02 | 1.18 | 1.24 |
+| 0.6% | Correlated PyMatching | 1.25 | 1.49 | 1.55 |
+| 0.6% | UnionFind3D | 0.94 | 1.12 | 1.16 |
+| 0.6% | Hierarchical | 1.16 | 1.26 | 1.31 |
+| 0.7% | PyMatching | 0.91 | 1.04 | 1.07 |
+| 0.7% | Correlated PyMatching | 1.09 | 1.22 | 1.28 |
+| 0.7% | UnionFind3D | 0.91 | 0.98 | 1.01 |
+| 0.7% | Hierarchical | 1.01 | 1.06 | 1.09 |
+
+- **p = 0.2% has few failures:** at d = 9 only 15–57 per decoder, at d = 7 77–172, out of 500,000
+  shots. Λ(7 → 9) there has a 95% uncertainty of roughly ±30–55% (≈ 1.96·√(1/k₉ + 1/k₇)), so the
+  ordering within the 0.2% rows is not meaningful (e.g. UnionFind3D's 3.43 → 3.02).
+- Hierarchical's Λ is above plain PyMatching's in all 18 (p, d) cells. Correlated PyMatching's is the highest at every
+  point.
+- At p = 0.7% Λ is close to 1 for every decoder, and below 1 for d = 3 → 5 (PyMatching and
+  UnionFind3D 0.91; UnionFind3D also at 0.6%, 0.94). Near p = 0.7%, a larger distance no longer
+  reduces the failure rate.
 
 ### Earlier: benchmark run 1, before correlations (commit `5e7b5ff`)
 
