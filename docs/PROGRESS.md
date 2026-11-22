@@ -971,3 +971,20 @@ Step 3 commit: `d700754` (branch).
   the incident edges of active clusters (about 6 rounds per pass), not wasted scans, so restricting
   the scan to frontier lists saves nothing.
 - **Decision:** revert, per the plan; the repo files were never changed.
+
+Step 4 commit: `1248dc4` (branch).
+
+## Step 5: final benchmark and decision (branch, 02:17 to 02:25)
+Script `scripts/final_compare.py`. main's kernels (`aaf0e88`) were loaded from git and timed in the
+same process as the branch's. p = 0.5%, d = 3/5/7/9, 5 × 50k = 250k shots, single thread, numba cache
+cleared, Best-performance mode. Outputs: `results/optimization/final_step5_20261122_021304.{csv,png}`.
+
+| d | PyMatching | Correlated PM | UnionFind3D | **Hierarchical (main)** | **Hierarchical (branch)** | branch vs main | branch ÷ PM |
+|---|---|---|---|---|---|---|---|
+| 3 | 1.656% · 0.31 µs | 1.625% · 0.88 | 1.667% · 0.59 | 1.703% [1.653, 1.755] · 0.50 | 1.703% (identical) · 0.48 | −4% | 1.55× |
+| 5 | 1.383% [1.338, 1.429] · 2.49 | 1.076% · 7.10 | 1.523% · 2.64 | 1.227% [1.185, 1.271] · 5.84 | 1.236% [1.193, 1.280] · 5.00 | **−14%** | 2.01× |
+| 7 | 1.035% [0.996, 1.075] · 8.43 | 0.609% · 23.52 | 1.222% · 7.77 | 0.835% [0.800, 0.871] · 17.59 | 0.859% [0.823, 0.896] · 13.49 | **−23%** | 1.60× |
+| 9 | 0.670% [0.638, 0.702] · 20.23 | 0.299% · 57.82 | 0.846% · 18.21 | 0.496% [0.470, 0.525] · 39.53 | 0.511% [0.484, 0.540] · 31.46 | **−20%** | 1.56× |
+
+**Decision: merge.** The branch is faster (−14 to −23% at d = 5–9) with LER inside main's 95% CI at every
+d, the suite is green, and the lead over plain PyMatching still has non-overlapping CIs at d = 5/7/9.
