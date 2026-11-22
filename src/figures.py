@@ -227,10 +227,14 @@ def _subtitle(meta: dict, shots: int | None = None, p: float | None = None) -> s
 
 
 # ---- accuracy vs runtime (the standard figure) -------------------------------------------
-def plot_accuracy_runtime(rows: list[dict], meta: dict | None = None):
+def plot_accuracy_runtime(rows: list[dict], meta: dict | None = None, show_multithread: bool = False):
     """rows: decoder, d, p, shots, ler, ci_low, ci_high, us_per_shot, threads.
-    Filled markers = 1 thread; hollow markers = the multi-thread run of the same decoder."""
+    Fair speed reporting: by default only single-thread rows are drawn, so every decoder is
+    compared with single-thread PyMatching. show_multithread=True adds hollow markers for the
+    multi-thread rows (our scaling; see thread_scaling.png)."""
     meta = meta or {}
+    if not show_multithread:
+        rows = [r for r in rows if (r.get("threads") or 1) == 1]
     decoders = order_decoders(r["decoder"] for r in rows)
     distances = sorted({r["d"] for r in rows})
     fig, axes = plt.subplots(1, len(distances), figsize=(_width(len(distances), 5.4), 6.0),
@@ -263,7 +267,8 @@ def plot_accuracy_runtime(rows: list[dict], meta: dict | None = None):
                               label=f"hollow marker = {multi[-1]} threads"))
     top = _legend(fig, handles)
     meta = {**meta, "threads_note": meta.get("threads_note") or
-            (f"filled = 1 thread, hollow = {multi[-1]} numba threads" if multi else "1 thread")}
+            (f"filled = 1 thread, hollow = {multi[-1]} numba threads" if multi
+             else "every decoder single-thread (PyMatching too)")}
     _footer(fig, ["Lower and further left is better. Whiskers show 95% Wilson intervals for the failure "
                   "rate. Batch time = one decode call over all shots / shots.", machine_line(meta)])
     fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.22, wspace=0.18)
@@ -367,7 +372,9 @@ def plot_thread_scaling(rows: list[dict], meta: dict | None = None):
                           label="PyMatching (single-thread reference)"))
     top = _legend(fig, handles)
     _footer(fig, ["Lower is better. Shots are independent, so the batch is split across threads "
-                  "(numba prange); labels give the speed-up over 1 thread.", machine_line(meta)])
+                  "(numba prange); labels give the speed-up over 1 thread. This shows how our decoders "
+                  "scale, not a like-for-like race: PyMatching is drawn single-threaded, but it can also "
+                  "be run on separate shot batches in parallel processes.", machine_line(meta)])
     fig.subplots_adjust(left=0.08, right=0.97, top=top, bottom=0.2, wspace=0.18)
     return fig
 

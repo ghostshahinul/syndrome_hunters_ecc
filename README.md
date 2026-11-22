@@ -229,21 +229,32 @@ decoder). Source: `results/accuracy_runtime_20261121_202412.csv`, figure
 | Cube-Collapse | 2.676 [2.538, 2.821] | 9.436 [9.183, 9.695] | 18.18 [17.85, 18.52] | 30.96 [30.56, 31.37] |
 | PyMatching 2D on flat | 2.676 [2.538, 2.821] | 5.556 [5.359, 5.760] | 11.73 [11.45, 12.02] | 20.80 [20.45, 21.16] |
 
-**Batch time, µs per shot: single thread (12 numba threads in brackets)**
+**Batch time, µs per shot, every decoder single-thread** (the fair comparison: PyMatching is
+single-threaded per decode call, and so is everything in this table)
 
 | Decoder | d = 3 | d = 5 | d = 7 | d = 9 |
 |---|---|---|---|---|
 | PyMatching | 0.35 | 2.33 | 7.97 | 20.21 |
 | Correlated PyMatching | 0.97 | 6.51 | 22.08 | 54.39 |
-| **UnionFind3D** | 0.43 (0.11) | 2.30 (0.51) | 6.92 (0.99) | 16.50 (2.23) |
-| **Hierarchical** | 0.34 (0.05) | 2.37 (0.35) | 6.98 (0.96) | 16.60 (2.26) |
-| Hierarchical (partial) | 0.30 (0.04) | 2.84 (0.37) | 9.19 (1.26) | 22.20 (2.80) |
+| **UnionFind3D** | 0.43 | 2.30 | 6.92 | 16.50 |
+| **Hierarchical** | 0.34 | 2.37 | 6.98 | 16.60 |
+| Hierarchical (partial) | 0.30 | 2.84 | 9.19 | 22.20 |
 | Cube-Collapse | 0.55 | 6.39 | 23.63 | 44.08 |
 | PyMatching 2D on flat | 0.31 | 1.46 | 4.07 | 10.08 |
 
-PyMatching runs on one thread. **Single thread vs single thread is the fair comparison.**
-The bracketed numbers show how our decoders scale. All times come from one run on one laptop
-(i5-13420H, 12 logical CPUs, AC power, "Balanced" plan) and are not comparable across runs.
+All times come from one run on one laptop (i5-13420H, 12 logical CPUs, AC power, "Balanced"
+plan) and are not comparable across runs. Multi-core numbers are kept separate (next section).
+
+### Parallelism, reported separately
+Two different things, and neither belongs in a race against single-thread PyMatching:
+- **Throughput (parallel over shots).** Shots are independent, so numba `prange` splits a
+  batch across threads, with 1 core per shot. UnionFind3D / Hierarchical go from 6.96 / 7.00 µs to
+  1.04 / 0.99 µs per shot at d=7 on 12 threads (6.7× / 7.1×) (`thread_scaling_latest.png`).
+  **PyMatching can do the same** by running separate shot batches in parallel processes, so
+  this shows how our kernels scale, not that we are faster.
+- **Latency (cores used per shot).** The ensemble decoder can split *one* shot's M variants
+  across cores (`parallel="variants"`). With M=8 at d=7 one shot takes 263 µs on 1 core and
+  58 µs on 8 cores (cores used per shot = 8). Plain PyMatching has no per-shot parallelism.
 
 **Sweep** (100,000 shots per point, single thread; `results/sweep_20261121_202412.csv`).
 Hierarchical / PyMatching LER at p = 0.1 / 0.2 / 0.3 / 0.5%:

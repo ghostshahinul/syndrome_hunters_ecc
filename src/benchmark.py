@@ -5,8 +5,8 @@
     python -m src.benchmark --only accuracy     # one part: accuracy | sweep | threads
 
 Parts
-  accuracy  circuit-level p = 0.5%, d = 3/5/7/9, every decoder on the same shots (seed 0).
-            numba decoders are timed at 1 thread and at the max thread count.
+  accuracy  circuit-level p = 0.5%, d = 3/5/7/9, every decoder on the same shots (seed 0),
+            every decoder single-thread (the fair comparison with PyMatching).
             -> results/accuracy_runtime_<ts>.csv, accuracy_runtime + cube_collapse_story PNGs
   sweep     p in 0.1-0.8%, d = 3/5/7/9, single-thread.
             -> results/sweep_<ts>.csv, accuracy_runtime_sweep + fast_path_fraction PNGs
@@ -146,8 +146,9 @@ def meta_for(fp: dict, run: int, backend: str = "numba") -> dict:
 
 
 def run_accuracy(args, fp, run, stamp, max_threads):
+    # Fair speed reporting: single thread only here; multi-thread scaling is its own figure.
     rows = measure_points(args.decoders, args.distances, [args.p], args.shots, args.seed,
-                          sorted({1, max_threads}), args.repeats, fp, run)
+                          (1,), args.repeats, fp, run)
     csv_path = write_rows(rows, args.out / f"accuracy_runtime_{stamp}.csv")
     meta = meta_for(fp, run)
     figs = [save_figure(plot_accuracy_runtime(rows, meta), "accuracy_runtime", args.out / "plots", stamp)]

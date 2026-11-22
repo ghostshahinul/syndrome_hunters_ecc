@@ -488,3 +488,19 @@ Item 1 commits: `707cda6`, merged with your teammates' cleanup and pushed as `bb
 
 - **Over variants:** 8 cores bring the latency of a single shot down 4.5–5.1×, to 58 µs (d=7). That is still 5× PyMatching single-thread.
 - **Over shots:** throughput is better (8.5–9× at 12 threads), but that is a throughput figure. PyMatching can be parallelized the same way with processes, so it is not a like-for-like comparison.
+
+Item 2 commit: `0186f54` (merge; it also took in teammate deletions of old figure stamps).
+
+## Item 3: fair speed reporting (21:42 to 21:46)
+- **`plot_accuracy_runtime`:** now draws **single-thread rows only** by default; the 12-thread
+  hollow markers are opt-in with `show_multithread=True`, which is tested. `src.benchmark`'s
+  accuracy part times every decoder single-thread.
+- **`thread_scaling` footer:** now says it shows our scaling, not a like-for-like race, because
+  PyMatching can also run separate shot batches in parallel processes.
+- **README results:** the timing table is single-thread only. A new subsection, "Parallelism,
+  reported separately", covers throughput across shots (with the PyMatching-processes caveat)
+  and latency as **cores used per shot** (ensemble: 1 core 263 µs vs 8 cores 58 µs at d=7, M=8).
+- **Figures re-rendered from the saved CSVs:** `accuracy_runtime_latest.png`,
+  `thread_scaling_latest.png` and `cube_collapse_story_latest.png` (stamp 214318/214319).
+- The operating-point figure (single-thread since 20:37) and `ensemble_vs_M` (single-thread)
+  already followed the rule.

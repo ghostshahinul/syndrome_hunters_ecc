@@ -60,6 +60,17 @@ def test_accuracy_runtime(accuracy_rows, tmp_path):
     _check(plot_accuracy_runtime(accuracy_rows, META), "accuracy_runtime", tmp_path)
 
 
+def test_accuracy_runtime_is_single_thread_by_default(accuracy_rows, tmp_path):
+    import matplotlib.pyplot as plt
+    fig = plot_accuracy_runtime(accuracy_rows, META)
+    n_default = sum(len(ax.lines) for ax in fig.axes)
+    plt.close(fig)
+    fig = plot_accuracy_runtime(accuracy_rows, META, show_multithread=True)
+    n_all = sum(len(ax.lines) for ax in fig.axes)
+    _check(fig, "accuracy_runtime_mt", tmp_path)
+    assert n_all > n_default  # the 12-thread rows only appear when asked for
+
+
 def test_cube_collapse_story(accuracy_rows, tmp_path):
     _check(plot_cube_collapse_story(accuracy_rows, META), "cube_collapse_story", tmp_path)
 
